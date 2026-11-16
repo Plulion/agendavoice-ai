@@ -1,0 +1,26 @@
+erDiagram
+  TENANTS ||--o{ USERS : owns
+  TENANTS ||--o{ BRANCHES : contains
+  TENANTS ||--o{ CUSTOMERS : owns
+  TENANTS ||--o{ SERVICES : catalogs
+  TENANTS ||--o{ APPOINTMENTS : schedules
+  TENANTS ||--o{ AUDIT_LOGS : records
+  USERS ||--o{ REFRESH_SESSIONS : renews
+  USERS ||--o{ USER_BRANCH_ACCESS : assigned
+  BRANCHES ||--o{ USER_BRANCH_ACCESS : grants
+  BRANCHES ||--o{ STAFF : employs
+  BRANCHES ||--o{ RESOURCES : contains
+  BRANCHES ||--o{ APPOINTMENTS : hosts
+  CUSTOMERS ||--o{ APPOINTMENTS : books
+  SERVICES ||--o{ APPOINTMENTS : defines
+  STAFF ||--o{ APPOINTMENTS : serves
+  RESOURCES ||--o{ APPOINTMENTS : uses
+  USERS ||--o{ AUDIT_LOGS : performs
+  USERS ||--|| AUTH_IDENTITIES : authenticates
+  TENANTS ||--|| SUBSCRIPTIONS : subscribes
+  BRANCHES ||--o{ BRANCH_HOURS : opens
+  BRANCHES ||--o{ BRANCH_BREAKS : pauses
+  STAFF ||--o{ STAFF_HOURS : works
+  STAFF ||--o{ STAFF_BREAKS : pauses
+  RESOURCES ||--o{ RESOURCE_HOURS : available
+  RESOURCES ||--o{ RESOURCE_BREAKS : pauses

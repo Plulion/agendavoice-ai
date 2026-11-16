@@ -1,0 +1,14 @@
+flowchart TB
+  Caller[Cliente] --> Twilio[Twilio Voice - pendiente]
+  Portal[Portal web React] --> API[FastAPI modular]
+  Twilio -. webhook futuro .-> API
+  API --> Identity[Identity / Tenants]
+  API --> Scheduling[Agenda universal]
+  API --> Salon[Vertical Salón]
+  API --> Voice[Orquestador voz - pendiente]
+  Voice -. herramientas .-> Scheduling
+  Voice -. lenguaje .-> Gemini[Gemini - pendiente]
+  API --> PG[(PostgreSQL + RLS)]
+  API --> Redis[(Redis)]
+  Worker[Workers futuros] --> Redis
+  Worker --> PG

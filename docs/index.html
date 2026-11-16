@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AgendaVoice AI R4.3.0 — Multi-Tenant &amp; Multi-Branch Scheduling Architecture</title>
+  <style>
+    :root {
+      --bg: #0b1120;
+      --surface: #111827;
+      --surface-alt: #1e293b;
+      --border: #334155;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-soft: rgba(56, 189, 248, 0.14);
+      --emerald: #10b981;
+      --emerald-soft: rgba(16, 185, 129, 0.14);
+      --amber: #f59e0b;
+      --amber-soft: rgba(245, 158, 11, 0.14);
+      --rose: #f43f5e;
+      --rose-soft: rgba(244, 63, 94, 0.14);
+      --purple: #a78bfa;
+      --code-bg: #090d16;
+      --radius: 12px;
+      --shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .container { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+
+    header {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(11, 17, 32, 0.9);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 64px; gap: 16px;
+    }
+
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1rem; }
+    .brand-badge {
+      background: var(--accent-soft); color: var(--accent);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      padding: 2px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600;
+    }
+
+    nav { display: flex; gap: 18px; flex-wrap: wrap; }
+    nav a { color: var(--text-muted); font-size: 0.88rem; font-weight: 500; }
+    nav a:hover { color: var(--text); text-decoration: none; }
+
+    .hero {
+      padding: 72px 0 56px; border-bottom: 1px solid var(--border);
+      background: radial-gradient(circle at 82% 12%, rgba(56, 189, 248, 0.14), transparent 45%),
+                  radial-gradient(circle at 12% 85%, rgba(16, 185, 129, 0.1), transparent 45%);
+    }
+
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--emerald); background: var(--emerald-soft);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 5px 14px; border-radius: 999px; margin-bottom: 20px;
+    }
+
+    .hero h1 { font-size: clamp(2rem, 4vw, 3.1rem); line-height: 1.13; font-weight: 800; margin-bottom: 18px; }
+    .hero p.lead { font-size: 1.13rem; color: var(--text-muted); max-width: 820px; margin-bottom: 28px; }
+
+    .badge-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 32px; }
+    .tech-pill {
+      background: var(--surface-alt); border: 1px solid var(--border); color: var(--text);
+      font-size: 0.82rem; font-weight: 500; padding: 6px 13px; border-radius: 8px;
+    }
+
+    .cta-row { display: flex; flex-wrap: wrap; gap: 14px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 11px 20px; border-radius: 9px; font-weight: 600; font-size: 0.92rem;
+      cursor: pointer; border: 1px solid transparent;
+    }
+    .btn-primary { background: var(--accent); color: #06101f; }
+    .btn-primary:hover { background: #7dd3fc; text-decoration: none; }
+    .btn-secondary { background: var(--surface-alt); color: var(--text); border-color: var(--border); }
+    .btn-secondary:hover { border-color: var(--accent); text-decoration: none; }
+
+    section { padding: 64px 0; border-bottom: 1px solid var(--border); }
+    section:last-of-type { border-bottom: none; }
+    .section-header { margin-bottom: 36px; }
+    .section-header h2 { font-size: 1.8rem; font-weight: 700; margin-bottom: 10px; }
+    .section-header p { color: var(--text-muted); max-width: 780px; font-size: 1.02rem; }
+
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 24px; }
+    @media (max-width: 540px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow);
+    }
+    .card h3 { font-size: 1.12rem; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+    .card p { color: var(--text-muted); font-size: 0.94rem; }
+
+    .step-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px; border-radius: 7px;
+      background: var(--accent-soft); color: var(--accent); font-size: 0.85rem; font-weight: 700; flex-shrink: 0;
+    }
+
+    .diagram-wrapper {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 28px; margin-bottom: 28px; overflow-x: auto; box-shadow: var(--shadow);
+    }
+    .diagram-wrapper svg { width: 100%; min-width: 860px; height: auto; display: block; }
+
+    /* Interactive Simulator */
+    .sim-box {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      overflow: hidden; box-shadow: var(--shadow);
+    }
+    .sim-toolbar {
+      background: var(--surface-alt); padding: 20px 24px; border-bottom: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .sim-toolbar-label { font-size: 0.82rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .preset-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+    .preset-btn {
+      background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      padding: 9px 14px; border-radius: 8px; font-size: 0.85rem; font-weight: 500; cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .preset-btn:hover, .preset-btn.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
+    .sim-body { display: grid; grid-template-columns: 1fr 1fr; }
+    @media (max-width: 860px) { .sim-body { grid-template-columns: 1fr; } }
+    .sim-pane { padding: 24px; }
+    .sim-pane:first-child { border-right: 1px solid var(--border); }
+    @media (max-width: 860px) { .sim-pane:first-child { border-right: none; border-bottom: 1px solid var(--border); } }
+
+    .pane-title { font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 14px; }
+    .trace-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+    .trace-item { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 11px 14px; font-size: 0.87rem; }
+    .trace-item strong { color: var(--accent); display: block; font-size: 0.77rem; text-transform: uppercase; margin-bottom: 3px; }
+
+    pre.json-box {
+      background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.83rem; color: #e2e8f0; overflow-x: auto; white-space: pre-wrap; margin-bottom: 16px;
+    }
+
+    .status-banner {
+      border-radius: 10px; padding: 14px 16px; font-size: 0.94rem;
+      border: 1px solid rgba(16, 185, 129, 0.35); background: var(--emerald-soft);
+    }
+    .status-banner.blocked {
+      border-color: rgba(244, 63, 94, 0.4); background: var(--rose-soft);
+    }
+    .status-banner span {
+      display: block; font-size: 0.76rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.05em; margin-bottom: 4px; color: var(--emerald);
+    }
+    .status-banner.blocked span { color: var(--rose); }
+
+    /* Tables */
+    .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; box-shadow: var(--shadow); margin-bottom: 28px; }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
+    th { background: var(--surface-alt); color: var(--text); font-weight: 600; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+    td { padding: 13px 18px; border-bottom: 1px solid var(--border); color: var(--text-muted); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+
+    td code, p code, li code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      background: var(--code-bg); border: 1px solid var(--border); padding: 2px 6px; border-radius: 5px; font-size: 0.84em; color: var(--accent);
+    }
+
+    .pill-ok {
+      display: inline-block; background: var(--emerald-soft); color: var(--emerald);
+      border: 1px solid rgba(16, 185, 129, 0.35); font-size: 0.76rem; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+    }
+    .pill-warn {
+      display: inline-block; background: var(--amber-soft); color: var(--amber);
+      border: 1px solid rgba(245, 158, 11, 0.35); font-size: 0.76rem; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+    }
+    .pill-block {
+      display: inline-block; background: var(--rose-soft); color: var(--rose);
+      border: 1px solid rgba(244, 63, 94, 0.35); font-size: 0.76rem; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+    }
+
+    .code-block {
+      background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.85rem; color: #e2e8f0; overflow-x: auto; line-height: 1.55; margin-bottom: 20px;
+    }
+
+    footer { padding: 40px 0; color: var(--text-muted); font-size: 0.88rem; border-top: 1px solid var(--border); text-align: center; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="container nav-inner">
+      <div class="brand">
+        <span>Webfinanzas Corp.</span>
+        <span class="brand-badge">AgendaVoice AI R4.3.0</span>
+      </div>
+      <nav>
+        <a href="#overview">Overview</a>
+        <a href="#architecture">Architecture Charts</a>
+        <a href="#simulator">Multi-Branch Simulator</a>
+        <a href="#rbac">RBAC &amp; Security Matrices</a>
+        <a href="#endpoints">API Reference</a>
+        <a href="#tutorial">Tutorial</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- HERO -->
+    <section class="hero" id="overview">
+      <div class="container">
+        <div class="eyebrow">Multi-Tenant &amp; Multi-Branch SaaS Scheduling Core + Omnichannel AI</div>
+        <h1>AgendaVoice AI — Enterprise Scheduling Engine</h1>
+        <p class="lead">
+          A production-minded multi-company and multi-branch scheduling platform built with <strong>FastAPI</strong>,
+          <strong>PostgreSQL 16 (<code>FORCE ROW LEVEL SECURITY</code> + <code>btree_gist</code>)</strong>, <strong>Redis 7</strong>,
+          and <strong>Google Gemini 2.5 Flash</strong>. Engineered so individual branches cannot view or leak each other's
+          calendars, staff, or customer lists—while allowing frictionless phone and WhatsApp bookings via industry-standard
+          <strong>Blind Upsert</strong> resolution.
+        </p>
+
+        <div class="badge-row">
+          <span class="tech-pill">FastAPI + SQLAlchemy 2.0</span>
+          <span class="tech-pill">PostgreSQL 16 FORCE RLS</span>
+          <span class="tech-pill">Composite Tenant-Branch FKs</span>
+          <span class="tech-pill">GiST Exclusion Concurrency Locks</span>
+          <span class="tech-pill">Blind Upsert Cross-Branch Phone Booking</span>
+          <span class="tech-pill">Gemini 2.5 Flash Voice &amp; WhatsApp</span>
+          <span class="tech-pill">24 / 24 Unit Tests Passing</span>
+        </div>
+
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#simulator">Launch Multi-Branch Simulator</a>
+          <a class="btn btn-secondary" href="#rbac">Inspect Security &amp; RBAC Matrices</a>
+          <a class="btn btn-secondary" href="#tutorial">Step-by-Step Developer Tutorial</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ARCHITECTURE CHARTS -->
+    <section id="architecture">
+      <div class="container">
+        <div class="section-header">
+          <h2>Two-Ring Isolation &amp; Omnichannel Architecture</h2>
+          <p>
+            AgendaVoice AI enforces data boundaries at two independent layers: physical PostgreSQL Row-Level Security
+            between companies (Ring 1), and branch-scoped access control with Blind Upsert resolution between branches of the same company (Ring 2).
+          </p>
+        </div>
+
+        <div class="diagram-wrapper">
+          <svg viewBox="0 0 1000 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AgendaVoice AI Architecture Diagram">
+            <defs>
+              <marker id="arr-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8" />
+              </marker>
+              <marker id="arr-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#10b981" />
+              </marker>
+            </defs>
+
+            <!-- Column 1: Omnichannel Entry -->
+            <rect x="16" y="24" width="205" height="80" rx="10" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5" />
+            <text x="118" y="50" fill="#38bdf8" font-size="11" font-weight="700" text-anchor="middle">VOICE AI &amp; WHATSAPP</text>
+            <text x="118" y="70" fill="#f1f5f9" font-size="13" font-weight="600" text-anchor="middle">Gemini 2.5 + Twilio HMAC</text>
+            <text x="118" y="88" fill="#94a3b8" font-size="11" text-anchor="middle">POST /channels/omnichannel/turn</text>
+
+            <rect x="16" y="124" width="205" height="80" rx="10" fill="#1e293b" stroke="#a78bfa" stroke-width="1.5" />
+            <text x="118" y="150" fill="#a78bfa" font-size="11" font-weight="700" text-anchor="middle">BRANCH RECEPTIONIST</text>
+            <text x="118" y="170" fill="#f1f5f9" font-size="13" font-weight="600" text-anchor="middle">React Panel / Phone Desk</text>
+            <text x="118" y="188" fill="#94a3b8" font-size="11" text-anchor="middle">Web Locks + BroadcastChannel</text>
+
+            <line x1="221" y1="64" x2="272" y2="105" stroke="#38bdf8" stroke-width="2" marker-end="url(#arr-blue)" />
+            <line x1="221" y1="164" x2="272" y2="125" stroke="#38bdf8" stroke-width="2" marker-end="url(#arr-blue)" />
+
+            <!-- Column 2: Ring 2 Branch Guard -->
+            <rect x="278" y="44" width="245" height="145" rx="12" fill="#0f172a" stroke="#38bdf8" stroke-width="2" />
+            <text x="400" y="72" fill="#38bdf8" font-size="11" font-weight="700" text-anchor="middle">RING 2: INTRA-TENANT BRANCH GUARD</text>
+            <text x="400" y="96" fill="#f1f5f9" font-size="13" font-weight="700" text-anchor="middle">assert_branch_access()</text>
+            <text x="400" y="118" fill="#94a3b8" font-size="11" text-anchor="middle">• Isolates schedules, staff &amp; bookings</text>
+            <text x="400" y="138" fill="#94a3b8" font-size="11" text-anchor="middle">• Filters GET /customers by branch</text>
+            <text x="400" y="158" fill="#10b981" font-size="11" font-weight="600" text-anchor="middle">• Blind Upsert by exact phone (+569...)</text>
+
+            <line x1="523" y1="116" x2="575" y2="116" stroke="#10b981" stroke-width="2" marker-end="url(#arr-green)" />
+
+            <!-- Column 3: Scheduling & DST Engine -->
+            <rect x="581" y="44" width="190" height="145" rx="12" fill="#1e293b" stroke="#10b981" stroke-width="1.5" />
+            <text x="676" y="72" fill="#10b981" font-size="11" font-weight="700" text-anchor="middle">UNIVERSAL SCHEDULER</text>
+            <text x="676" y="96" fill="#f1f5f9" font-size="13" font-weight="700" text-anchor="middle">availability.py</text>
+            <text x="676" y="118" fill="#94a3b8" font-size="11" text-anchor="middle">• 7-day hours &amp; breaks</text>
+            <text x="676" y="138" fill="#94a3b8" font-size="11" text-anchor="middle">• IANA TZ (America/Santiago)</text>
+            <text x="676" y="158" fill="#94a3b8" font-size="11" text-anchor="middle">• Strict DST gap/fold reject</text>
+
+            <line x1="771" y1="116" x2="812" y2="116" stroke="#10b981" stroke-width="2" marker-end="url(#arr-green)" />
+
+            <!-- Column 4: Ring 1 PostgreSQL 16 -->
+            <rect x="818" y="30" width="166" height="175" rx="12" fill="#111827" stroke="#10b981" stroke-width="2" />
+            <text x="901" y="56" fill="#10b981" font-size="11" font-weight="700" text-anchor="middle">RING 1: POSTGRESQL 16</text>
+            <text x="901" y="78" fill="#f1f5f9" font-size="13" font-weight="700" text-anchor="middle">FORCE RLS + GiST</text>
+            <text x="901" y="102" fill="#94a3b8" font-size="11" text-anchor="middle">• app.tenant_id GUC</text>
+            <text x="901" y="122" fill="#94a3b8" font-size="11" text-anchor="middle">• Composite FKs</text>
+            <text x="901" y="142" fill="#94a3b8" font-size="11" text-anchor="middle">• EXCLUDE USING gist</text>
+            <text x="901" y="162" fill="#94a3b8" font-size="11" text-anchor="middle">• Append-only Audit</text>
+            <text x="901" y="182" fill="#94a3b8" font-size="11" text-anchor="middle">• NOSUPERUSER role</text>
+
+            <!-- Bottom Bar: Redis + Transaction Context -->
+            <rect x="278" y="225" width="706" height="68" rx="10" fill="#111827" stroke="#334155" stroke-width="1.5" />
+            <text x="631" y="252" fill="#38bdf8" font-size="11" font-weight="700" text-anchor="middle">CROSS-CUTTING INFRASTRUCTURE &amp; SESSION HYGIENE</text>
+            <text x="631" y="274" fill="#e2e8f0" font-size="12" text-anchor="middle">SQLAlchemy Session.after_begin GUC Re-Application  •  Redis 7 Rate Limiter (Memory Fallback)  •  15s Concurrent Refresh Grace Window</text>
+          </svg>
+        </div>
+
+        <div class="grid-3">
+          <div class="card">
+            <h3><span class="step-num">01</span> Strict Branch Isolation</h3>
+            <p>
+              Operators assigned to <strong>Branch A (Las Condes)</strong> cannot list appointments, check staff schedules,
+              or browse customers belonging exclusively to <strong>Branch B (Providencia)</strong>. All unauthorized branch IDs return <code>404</code>.
+            </p>
+          </div>
+          <div class="card">
+            <h3><span class="step-num">02</span> Industry-Standard Blind Upsert</h3>
+            <p>
+              When a Branch A customer calls Branch B to book, the operator enters their phone number (<code>+569...</code>).
+              <code>POST /appointments</code> links the customer record cleanly without exposing Branch A's history or requiring an admin.
+            </p>
+          </div>
+          <div class="card">
+            <h3><span class="step-num">03</span> Zero Double-Booking (GiST)</h3>
+            <p>
+              PostgreSQL enforces <code>EXCLUDE USING gist</code> over <code>tstzrange(starts_at, ends_at, '[)')</code>
+              combined with ordered <code>pg_advisory_xact_lock</code> locks so simultaneous voice, web, and WhatsApp requests never collide.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- INTERACTIVE SIMULATOR -->
+    <section id="simulator">
+      <div class="container">
+        <div class="section-header">
+          <h2>Interactive Multi-Branch &amp; Omnichannel Simulator</h2>
+          <p>
+            Click through the 4 core architectural scenarios below to inspect how AgendaVoice AI handles cross-branch isolation,
+            Blind Upsert phone resolution, WhatsApp/Voice AI turns, and PostgreSQL concurrency locks.
+          </p>
+        </div>
+
+        <div class="sim-box">
+          <div class="sim-toolbar">
+            <div class="sim-toolbar-label">Select an Architectural Verification Scenario</div>
+            <div class="preset-buttons">
+              <button class="preset-btn active" data-scenario="blind_upsert">
+                1. Cross-Branch Phone Booking (Blind Upsert)
+              </button>
+              <button class="preset-btn" data-scenario="branch_isolation">
+                2. Unauthorized Branch B Spy Attempt (Blocked 404)
+              </button>
+              <button class="preset-btn" data-scenario="whatsapp_gemini">
+                3. WhatsApp / Voice Gemini 2.5 Booking Turn
+              </button>
+              <button class="preset-btn" data-scenario="gist_concurrency">
+                4. Concurrent Double-Booking Prevention (GiST 409)
+              </button>
+            </div>
+          </div>
+
+          <div class="sim-body">
+            <div class="sim-pane">
+              <div class="pane-title">Security &amp; Database Execution Trace</div>
+              <ul class="trace-list" id="traceList"></ul>
+            </div>
+            <div class="sim-pane">
+              <div class="pane-title">API Request / Response Payload</div>
+              <pre class="json-box" id="jsonPayload"></pre>
+              <div class="status-banner" id="statusBanner">
+                <span id="statusTitle">Outcome</span>
+                <div id="statusText"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RBAC & SECURITY MATRICES -->
+    <section id="rbac">
+      <div class="container">
+        <div class="section-header">
+          <h2>Role-Based Access Control (RBAC) &amp; Customer Scope Matrix</h2>
+          <p>
+            Every authenticated request sets <code>app.tenant_id</code> in PostgreSQL and evaluates branch membership via <code>user_branch_access</code>.
+          </p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Role</th>
+                <th>Branch Visibility</th>
+                <th>Schedule &amp; Staff Config</th>
+                <th>Customer List (<code>GET /customers</code>)</th>
+                <th>Cross-Branch Phone Booking</th>
+                <th>Audit Logs</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>SUPER_ADMIN</code> / <code>TENANT_ADMIN</code></td>
+                <td>All company branches</td>
+                <td><span class="pill-ok">Full CRUD</span></td>
+                <td>All customers in company</td>
+                <td><span class="pill-ok">Allowed</span></td>
+                <td><span class="pill-ok">Read Access</span></td>
+              </tr>
+              <tr>
+                <td><code>BRANCH_MANAGER</code></td>
+                <td>Assigned <code>branch_ids</code> only</td>
+                <td><span class="pill-ok">Own Branch CRUD</span></td>
+                <td>Only customers registered or booked in own branch</td>
+                <td><span class="pill-ok">Blind Upsert by Phone</span></td>
+                <td><span class="pill-block">403 Forbidden</span></td>
+              </tr>
+              <tr>
+                <td><code>OPERATOR</code></td>
+                <td>Assigned <code>branch_ids</code> only</td>
+                <td><span class="pill-warn">Read-Only</span></td>
+                <td>Only customers registered or booked in own branch</td>
+                <td><span class="pill-ok">Blind Upsert by Phone</span></td>
+                <td><span class="pill-block">403 Forbidden</span></td>
+              </tr>
+              <tr>
+                <td><code>READ_ONLY</code></td>
+                <td>Assigned <code>branch_ids</code> only</td>
+                <td><span class="pill-warn">Read-Only</span></td>
+                <td>Only customers registered or booked in own branch</td>
+                <td><span class="pill-block">403 Forbidden</span></td>
+                <td><span class="pill-block">403 Forbidden</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- API ENDPOINTS TABLE -->
+    <section id="endpoints">
+      <div class="container">
+        <div class="section-header">
+          <h2>REST API Endpoints Reference (v4.3.0)</h2>
+          <p>Interactive OpenAPI / Swagger documentation is automatically served at <code>http://localhost:8000/docs</code>.</p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Method &amp; Route</th>
+                <th>Minimum Role</th>
+                <th>Isolation &amp; Business Behavior</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>POST /auth/register</code><br/><code>POST /auth/login</code><br/><code>POST /auth/refresh</code></td>
+                <td>Public / Token</td>
+                <td>Resolves tenant via minimal <code>auth_identities</code> index, activates PostgreSQL RLS, rotates single-use JTI refresh tokens with a 15s multi-tab grace window.</td>
+              </tr>
+              <tr>
+                <td><code>GET/POST /branches</code><br/><code>GET/PUT /branches/{id}/schedule</code></td>
+                <td>Authenticated / Manager</td>
+                <td>Lists only allowed branches; configures 7-day local opening windows and breaks in validated IANA timezone (<code>America/Santiago</code>).</td>
+              </tr>
+              <tr>
+                <td><code>GET /customers</code><br/><code>POST /customers</code></td>
+                <td>Authenticated / Operator</td>
+                <td>Filters customers by <code>home_branch_id</code> or appointment history in allowed branches. Associates new customers with their origin branch.</td>
+              </tr>
+              <tr>
+                <td><code>POST /customers/resolve-phone</code></td>
+                <td>Operator / Manager</td>
+                <td><strong>New in R4.3.0:</strong> Rate-limited exact phone lookup/creation (+569...). Returns sanitized customer ID &amp; name for cross-branch booking without leaking other branches' metadata.</td>
+              </tr>
+              <tr>
+                <td><code>GET /availability</code><br/><code>POST /appointments</code><br/><code>POST /appointments/{id}/cancel</code></td>
+                <td>Authenticated / Operator</td>
+                <td>Computes DST-safe slots; supports inline <code>customer_phone</code> Blind Upsert; locks resources via <code>pg_advisory_xact_lock</code> + <code>EXCLUDE USING gist</code>.</td>
+              </tr>
+              <tr>
+                <td><code>POST /channels/omnichannel/turn</code></td>
+                <td>Operator / Webhook</td>
+                <td><strong>New in R4.3.0:</strong> Executes a branch-isolated Gemini 2.5 Flash Voice or WhatsApp conversation turn to check slots or confirm appointments.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- STEP-BY-STEP TUTORIAL -->
+    <section id="tutorial">
+      <div class="container">
+        <div class="section-header">
+          <h2>Step-by-Step Developer &amp; QA Tutorial</h2>
+          <p>Run the unit test suites, launch the Docker Compose stack, or verify PostgreSQL Row-Level Security locally.</p>
+        </div>
+
+        <div class="code-block">
+# 1. Clone repository &amp; run the 3 zero-dependency unit test suites (24 tests)
+cd backend
+PYTHONPATH=. python3 tests/test_customer_scope_r422.py
+PYTHONPATH=. python3 tests/test_dst_policy_r421.py
+PYTHONPATH=. python3 tests/test_omnichannel_r430.py
+
+# 2. Launch PostgreSQL 16, Redis 7, FastAPI (port 8000), and React/Vite (port 5173)
+cd ..
+cp .env.example .env
+docker compose up -d --build
+
+# 3. Execute live PostgreSQL 16 FORCE RLS &amp; concurrent GiST exclusion tests
+./scripts/test-postgres-rls-compose.sh
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>
+        <strong>Webfinanzas Corp.</strong> — B2B SaaS &amp; Conversational AI Architectures •
+        Copyright &copy; 2026 Pedro Stephen Lulion Pasten • Released under the MIT License.
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    const SCENARIOS = {
+      blind_upsert: {
+        trace: [
+          { label: "1. Caller & Active Branch Context", value: "Operator at Sucursal Providencia (branch_id=2) receives a phone call from Carlos Méndez (+56 9 1234 5678)." },
+          { label: "2. Historical State in PostgreSQL", value: "Carlos was originally registered at Sucursal Las Condes (home_branch_id=1). He does NOT appear in Providencia's GET /customers list." },
+          { label: "3. Blind Upsert Execution (POST /appointments)", value: "Operator submits customer_phone='+56912345678'. Backend normalizes phone, locates customer_id=42 within Tenant RLS, and links the new appointment in branch_id=2." },
+          { label: "4. Privacy & Audit Guarantee", value: "Las Condes appointment history and metadata remain hidden. Audit event 'customer.cross_branch_linked' is recorded in append-only audit_logs." }
+        ],
+        payload: {
+          request: {
+            endpoint: "POST /appointments",
+            actor_role: "OPERATOR (allowed_branches: [2])",
+            body: {
+              branch_id: 2,
+              customer_phone: "+56 9 1234 5678",
+              customer_name: "Carlos Méndez",
+              service_id: 1,
+              staff_id: 5,
+              starts_at: "2026-11-18T15:00:00-03:00"
+            }
+          },
+          response_201: {
+            id: 108,
+            branch_id: 2,
+            customer_id: 42,
+            service_id: 1,
+            staff_id: 5,
+            starts_at: "2026-11-18T18:00:00Z",
+            ends_at: "2026-11-18T18:30:00Z",
+            status: "CONFIRMED"
+          }
+        },
+        blocked: false,
+        title: "201 CREATED — Cross-Branch Booking Confirmed Without Admin Intervention",
+        text: "Customer #42 is now legitimately linked to Sucursal Providencia (branch_id=2) without exposing any prior appointments from Sucursal Las Condes."
+      },
+      branch_isolation: {
+        trace: [
+          { label: "1. Actor Context", value: "User 'operator_providencia' authenticated with JWT (tenant_id=1, role='OPERATOR', allowed_branches=[2])." },
+          { label: "2. Unauthorized Request", value: "Attempts GET /appointments?branch_id=1 to inspect Sucursal Las Condes schedule." },
+          { label: "3. Ring 2 Permission Check", value: "assert_branch_access(db, user, branch_id=1) detects 1 not in [2]." },
+          { label: "4. Zero-Leak Response", value: "Immediately aborts with HTTP 404 'Sucursal no encontrada' so unauthorized branch IDs cannot even be enumerated." }
+        ],
+        payload: {
+          request: {
+            endpoint: "GET /appointments?branch_id=1",
+            actor_role: "OPERATOR (allowed_branches: [2])"
+          },
+          response_404: {
+            detail: "Sucursal no encontrada"
+          }
+        },
+        blocked: true,
+        title: "404 NOT FOUND — Cross-Branch Schedule Access Blocked",
+        text: "Branch-scoped users cannot view appointments, staff, resources, or customer lists belonging to other branches."
+      },
+      whatsapp_gemini: {
+        trace: [
+          { label: "1. Incoming Webhook Verification", value: "Twilio/Meta delivers WhatsApp message from 'whatsapp:+56987654321'. verify_twilio_signature() validates HMAC-SHA1 header." },
+          { label: "2. Branch & Tenant Binding", value: "Destination number maps to Tenant #1, Sucursal Las Condes (branch_id=1, timezone='America/Santiago'). RLS GUC app.tenant_id='1' is set." },
+          { label: "3. Gemini 2.5 Flash Scoped Turn", value: "run_branch_conversation_turn() invokes get_availability() and create_appointment() strictly bound to branch_id=1." },
+          { label: "4. Automated WhatsApp Reply", value: "Customer receives instant confirmation with appointment ID and local Santiago timestamp." }
+        ],
+        payload: {
+          request: {
+            endpoint: "POST /channels/omnichannel/turn",
+            body: {
+              branch_id: 1,
+              channel: "WHATSAPP",
+              sender_phone: "whatsapp:+56987654321",
+              sender_name: "Andrea Rojas",
+              message: "Quiero confirmar la hora de mañana a las 10:30",
+              service_id: 1,
+              staff_id: 2,
+              starts_at: "2026-11-17T10:30:00-03:00"
+            }
+          },
+          response_200: {
+            intent: "book",
+            branch: "Sucursal Las Condes",
+            customer_phone: "+56987654321",
+            appointment: {
+              id: 109,
+              starts_at: "2026-11-17T13:30:00+00:00",
+              status: "CONFIRMED"
+            },
+            reply: "Perfecto Andrea Rojas, tu reserva #109 en sucursal Sucursal Las Condes quedó confirmada para 2026-11-17T13:30:00+00:00. Te esperamos."
+          }
+        },
+        blocked: false,
+        title: "200 OK — Omnichannel WhatsApp/Voice Turn Executed Under Branch RLS",
+        text: "The AI agent resolved the customer's verified WhatsApp number and booked directly in Sucursal Las Condes."
+      },
+      gist_concurrency: {
+        trace: [
+          { label: "1. Simultaneous Requests", value: "Two concurrent requests (Voice AI + Web Receptionist) attempt to book Staff #2 at 11:00–11:40 for the same branch." },
+          { label: "2. Transaction Advisory Lock", value: "API acquires ordered pg_advisory_xact_lock(hashtextextended('tenant:1:branch:1:staff:2', 0))." },
+          { label: "3. PostgreSQL GiST Exclusion Constraint", value: "Constraint 'ex_appointments_staff_no_overlap' evaluates tstzrange(starts_at, ends_at, '[)') WITH && at the storage engine level." },
+          { label: "4. Deterministic Resolution", value: "First transaction commits 201 Created; second transaction is rejected with 409 Conflict." }
+        ],
+        payload: {
+          concurrent_attempt_1: { status: 201, result: "CONFIRMED (id=110)" },
+          concurrent_attempt_2: {
+            status: 409,
+            detail: "El profesional o recurso ya tiene una reserva en ese horario"
+          },
+          database_constraint: "EXCLUDE USING gist (tenant_id WITH =, staff_id WITH =, tstzrange(starts_at, ends_at, '[)') WITH &&)"
+        },
+        blocked: true,
+        title: "409 CONFLICT — Double-Booking Prevented by PostgreSQL GiST Constraint",
+        text: "Even if two requests arrive at the exact same millisecond across different worker processes, PostgreSQL guarantees zero overlapping appointments."
+      }
+    };
+
+    function renderScenario(key) {
+      const s = SCENARIOS[key];
+      document.getElementById("traceList").innerHTML = s.trace
+        .map(t => `<li class="trace-item"><strong>${t.label}</strong>${t.value}</li>`)
+        .join("");
+      document.getElementById("jsonPayload").textContent = JSON.stringify(s.payload, null, 2);
+      const banner = document.getElementById("statusBanner");
+      banner.className = s.blocked ? "status-banner blocked" : "status-banner";
+      document.getElementById("statusTitle").textContent = s.title;
+      document.getElementById("statusText").textContent = s.text;
+    }
+
+    document.querySelectorAll(".preset-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        renderScenario(btn.getAttribute("data-scenario"));
+      });
+    });
+
+    renderScenario("blind_upsert");
+  </script>
+</body>
+</html>

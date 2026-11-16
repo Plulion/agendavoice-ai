@@ -1,0 +1,1 @@
+# Vertical automotive\n\nVertical reservado para talleres. No contiene lógica productiva todavía.\n

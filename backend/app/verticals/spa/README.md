@@ -1,0 +1,1 @@
+# Vertical spa\n\nVertical reservado para una etapa posterior. No contiene lógica productiva todavía.\n

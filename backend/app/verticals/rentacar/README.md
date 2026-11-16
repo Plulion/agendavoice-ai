@@ -1,0 +1,1 @@
+# Vertical rentacar\n\nVertical reservado para migrar reglas y atributos de vehículos fuera del núcleo universal.\n

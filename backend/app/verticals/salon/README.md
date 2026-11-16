@@ -1,0 +1,1 @@
+# Vertical salon\n\nVertical inicial: reglas y vocabulario de peluquerías/barberías. Servicios, profesionales, especialidades y recursos usan el núcleo compartido.\n
