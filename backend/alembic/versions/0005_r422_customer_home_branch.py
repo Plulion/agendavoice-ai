@@ -1,7 +1,6 @@
-"""R4.2.2: sucursal de origen de clientes para filtrar por acceso.
+"""R4.2.2: Add customer origin branch (home_branch_id) for branch-scoped visibility.
 
-Antes, cualquier usuario de la empresa veía todos los clientes. Ahora un cliente es visible
-para su sucursal de origen o para las sucursales donde tiene reservas.
+Ensures customers are visible only to their origin branch or branches where they have appointments.
 """
 from alembic import op
 import sqlalchemy as sa
@@ -18,11 +17,10 @@ def upgrade():
                           ["tenant_id", "home_branch_id"], ["tenant_id", "id"])
     op.create_index("ix_customers_tenant_home_branch", "customers", ["tenant_id", "home_branch_id"])
 
-    # FORCE RLS también afecta al propietario: sin contexto de tenant, el UPDATE no vería filas
-    # y la consulta de appointments devolvería vacío. Se desactiva solo en esta transacción DDL.
+    # Temporarily disable RLS during DDL backfill so all existing customer rows are updated.
     op.execute("ALTER TABLE customers DISABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE appointments DISABLE ROW LEVEL SECURITY")
-    # Relleno inicial: la sucursal de la primera reserva del cliente.
+    # Backfill home_branch_id from each customer's earliest appointment branch.
     op.execute("""
         UPDATE customers AS c
         SET home_branch_id = first_visit.branch_id

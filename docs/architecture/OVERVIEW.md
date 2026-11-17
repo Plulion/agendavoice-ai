@@ -1,47 +1,21 @@
-# AgendaVoice AI — Arquitectura R4.2
+# AgendaVoice AI — Architecture Overview (R4.3.0)
 
-## Principios
+## Architectural Principles
 
-AgendaVoice AI es un SaaS universal multiempresa y multisucursal. El núcleo compartido concentra identidad, tenant, sucursales, usuarios/permisos, clientes, catálogo, agenda, notificaciones, suscripciones y auditoría. Las reglas particulares se implementan en módulos verticales. El primer vertical comercial previsto es salones/barberías.
+AgendaVoice AI is a multi-tenant, multi-branch B2B scheduling platform. The shared core manages identity, tenant isolation, branches, role-based permissions, customer scope, service catalogs, weekly schedules, concurrency locks, omnichannel AI orchestration, and append-only audit logs.
 
-R4.2 incorpora el hito **Motor universal de agenda** sobre la fundación de seguridad R4.1. No debe confundirse con el MVP integrado.
+## Layered Design
 
-## Capas
+- **API Layer:** FastAPI with JWT authentication, Redis fixed-window rate limiting, and strict branch-level RBAC (`assert_branch_access`).
+- **Domain Modules:** `identity`, `tenants`, `branches`, `customers`, `catalog`, `scheduling`, `subscriptions`, `audit`, plus `integrations/gemini` and `integrations/twilio`.
+- **Persistence & Concurrency:** SQLAlchemy 2.0, PostgreSQL 16, and Alembic. Appointments are stored as UTC `TIMESTAMPTZ` ranges (`[starts_at, ends_at)`), while recurring weekly schedules use each branch's local IANA timezone (`America/Santiago`).
+- **Two-Ring Isolation:**
+  - **Ring 1 (Inter-Tenant):** PostgreSQL `ENABLE` + `FORCE ROW LEVEL SECURITY` bound to `app.tenant_id` across all tables (including `tenants`).
+  - **Ring 2 (Intra-Tenant Branch Scope):** `user_branch_access` filtering for schedules, staff, resources, appointments, and customer lists, paired with exact-phone **Blind Upsert** for frictionless cross-branch telephone/WhatsApp booking.
+- **Double-Booking Prevention:** Transaction-scoped `pg_advisory_xact_lock` combined with PostgreSQL `EXCLUDE USING gist` (`btree_gist`) constraints over active appointments.
 
-- **API:** FastAPI, autenticación JWT, autorización por rol y sucursal.
-- **Dominio:** módulos identity, tenants, branches, customers, catalog, scheduling, subscriptions, audit. Scheduling contiene horarios semanales y pausas para sucursales, profesionales y recursos.
-- **Persistencia:** SQLAlchemy 2, PostgreSQL y Alembic. Las reservas se persisten en UTC; los horarios recurrentes usan hora local IANA de la sucursal.
-- **Aislamiento:** contexto transaccional `app.tenant_id` + RLS `ENABLE/FORCE`, incluida la tabla raíz `tenants`.
-- **Sesiones:** access JWT corto y refresh JWT rotativo, persistido mediante hash de JTI.
-- **Frontend:** React, TypeScript y Vite; tokens en sessionStorage en esta versión.
-- **Concurrencia de agenda:** advisory locks en API y `EXCLUDE USING gist` con `btree_gist` en PostgreSQL para profesionales y recursos.
-- **Servicios auxiliares:** Redis disponible en Compose; Twilio/Gemini continúan como integración pendiente.
+## Authentication & Transaction Context Lifecycle
 
-## Flujo de autenticación
-
-1. Registro crea tenant, usuario administrador, identidad global mínima, suscripción y sesión de refresh.
-2. Login busca `auth_identities` por correo normalizado; obtiene solo `user_id` y `tenant_id`.
-3. El backend fija `app.tenant_id` y consulta `users` bajo RLS para verificar contraseña y estado.
-4. El access token contiene `sub`, `tenant_id`, rol informativo, `iat`, `exp` y tipo. La autorización usa el rol consultado desde DB, no el claim del cliente.
-5. Refresh valida sesión, bloquea la fila, revoca el token anterior y emite un nuevo par en la misma transacción.
-
-## Flujo de contexto tenant
-
-`Session.info['tenant_id']` conserva el tenant autenticado durante el request. El evento `after_begin` establece el GUC con `set_config(..., true)` al inicio de cada transacción. Esto evita que el `COMMIT` de una operación quite el contexto necesario para una consulta ORM posterior y evita dejar un GUC persistente en una conexión del pool.
-
-## Permisos
-
-`TENANT_ADMIN` administra el tenant. `BRANCH_MANAGER`, `OPERATOR` y `READ_ONLY` tienen asignaciones explícitas en `user_branch_access`. El acceso se comprueba tanto en la API como en RLS a nivel tenant. R4.1 no implementa administración global cross-tenant.
-
-## Estado de roadmap
-
-- **R4.0:** fundación modular multiempresa/multisucursal.
-- **R4.1:** seguridad y núcleo SaaS.
-- **R4.2:** motor universal de agenda (horarios, pausas, disponibilidad, cancelación y exclusión concurrente en PostgreSQL).
-
-## Próximos hitos
-
-- **R4.3:** vertical salones/barberías.
-- **R4.4:** Twilio, orquestador conversacional y Gemini.
-- **R4.5:** panel administrativo completo.
-- **R4.6:** validación integrada y piloto.
+1. Registration (`POST /auth/register`) reserves a sequence ID, sets `app.tenant_id`, and atomically creates the tenant, `TENANT_ADMIN` user, `auth_identities` lookup row, trial subscription, and rotating refresh session.
+2. Login (`POST /auth/login`) queries `auth_identities` by normalized email to obtain `(user_id, tenant_id)`, activates `app.tenant_id` under RLS, and verifies the password hash against `users`.
+3. `Session.info["tenant_id"]` stores the active tenant for the HTTP request lifecycle, while a SQLAlchemy `Session.after_begin` listener re-executes `SELECT set_config('app.tenant_id', ..., true)` at the start of every transaction so `COMMIT` calls never drop RLS context.

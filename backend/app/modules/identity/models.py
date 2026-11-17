@@ -17,10 +17,10 @@ class User(Base):
                       UniqueConstraint("tenant_id", "id", name="uq_users_tenant_id"))
 
 class AuthIdentity(Base):
-    """Índice mínimo de identidad global para localizar el tenant durante login.
+    """Minimal global identity lookup index used to resolve tenant_id during login.
 
-    No contiene hashes ni datos de negocio. La aplicación usa el resultado para
-    establecer el tenant y luego verifica la contraseña contra users bajo RLS.
+    Contains no password hashes or business data. Once tenant_id is resolved,
+    the application sets app.tenant_id and verifies credentials against users under RLS.
     """
     __tablename__ = "auth_identities"
     email: Mapped[str] = mapped_column(String(255), primary_key=True)

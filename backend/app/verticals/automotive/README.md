@@ -1,1 +1,3 @@
-# Vertical automotive\n\nVertical reservado para talleres. No contiene lógica productiva todavía.\n
+# Automotive Vertical
+
+Reserved vertical module for automotive service bays and workshop scheduling rules.

@@ -1,28 +1,28 @@
-"""Regla pura de visibilidad y resolución segura de clientes por sucursal (R4.3.0).
+"""Pure branch-scoped customer visibility and cross-branch Blind Upsert rules (R4.3.0).
 
-Un cliente es visible en listados generales (GET /customers) para un usuario si:
-- el usuario tiene acceso a todas las sucursales (None: TENANT_ADMIN o SUPER_ADMIN), o
-- la sucursal de origen del cliente (home_branch_id) está entre sus sucursales, o
-- el cliente tiene al menos una reserva en alguna de sus sucursales.
+A customer is visible in general directory listings (GET /customers) if:
+- the user has tenant-wide access (None: TENANT_ADMIN or SUPER_ADMIN), or
+- the customer's origin branch (home_branch_id) is among the user's allowed branches, or
+- the customer has at least one appointment in one of the user's allowed branches.
 
-Estándar de industria para agendamiento entre sucursales (Blind Upsert / Exact Phone Match):
-- Una sucursal NO puede explorar ni listar clientes de otras sucursales.
-- Cuando un cliente llama por teléfono o escribe por WhatsApp a una nueva sucursal B y
-  entrega su número exacto (+569...), el sistema normaliza el teléfono y vincula la
-  nueva cita al registro único del tenant sin exponer el historial de otras sucursales.
-- Una vez creada la cita en la sucursal B, el cliente pasa legítimamente a ser visible en B.
+Industry standard for cross-branch telephone/WhatsApp booking (Blind Upsert):
+- A branch cannot browse or list customers belonging exclusively to other branches.
+- When a customer calls or messages a new branch B and provides their exact phone number (+569...),
+  the backend normalizes the phone number and links the new appointment to the single tenant customer
+  record without exposing prior history from other branches.
+- Once the appointment is booked in branch B, the customer legitimately becomes visible to branch B.
 """
 from collections.abc import Iterable
 import re
 
 
 def normalize_phone(phone: str) -> str:
-    """Normaliza un número telefónico conservando '+' inicial y dígitos."""
+    """Normalize a phone number, preserving a leading '+' and digits."""
     raw = (phone or "").strip()
     digits = re.sub(r"\D", "", raw)
     if not digits:
         return ""
-    # Si viene con 9 dígitos chilenos (ej. 912345678), normaliza a +56912345678
+    # Normalize 9-digit Chilean mobile numbers (e.g., 912345678 -> +56912345678)
     if len(digits) == 9 and digits.startswith("9"):
         return f"+56{digits}"
     if len(digits) == 11 and digits.startswith("569"):
@@ -44,8 +44,8 @@ def customer_visible(allowed_branch_ids: list[int] | None,
 
 
 def sanitize_cross_branch_customer(customer_id: int, name: str, phone: str) -> dict:
-    """Devuelve únicamente la ficha mínima necesaria para agendar por teléfono,
-    ocultando home_branch_id, correo y citas previas en otras sucursales.
+    """Return only the minimal customer fields required to complete a phone booking,
+    hiding home_branch_id, email, and prior visits at other branches.
     """
     return {
         "id": int(customer_id),

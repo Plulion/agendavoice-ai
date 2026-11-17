@@ -1,4 +1,4 @@
-# Importa todos los modelos para que Alembic registre el metadata completo.
+# Import all SQLAlchemy models so Alembic registers the complete metadata graph.
 from app.modules.tenants.models import Tenant
 from app.modules.identity.models import User, AuthIdentity, RefreshSession, UserBranchAccess
 from app.modules.branches.models import Branch

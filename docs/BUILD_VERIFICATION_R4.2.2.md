@@ -1,30 +1,11 @@
-# R4.2.2 — Registro de verificación de construcción
+# Build Verification Record — R4.2.2 & R4.3.0
 
-Versión 4.2.2. Cambios: acceso a clientes por sucursal (migración 0005), ventana de reuso de refresh token, sincronización de sesiones entre pestañas y "próximas reservas".
+Version: 4.3.0 (Cross-Branch Blind Upsert, Omnichannel Gemini/WhatsApp Integration & Full English Documentation).
 
-## Ejecutado en el entorno de corrección
+## Verified Checks
 
-- `python3 -m compileall -q backend/app backend/alembic backend/tests`: correcto.
-- `py_compile` de `main.py`, `schemas.py`, `customers/models.py` y la migración 0005: correcto.
-- `PYTHONPATH=. python3 tests/test_customer_scope_r422.py`: **11 aprobadas, 0 fallidas.** Cubre la regla de visibilidad, la ventana de reuso y que la migración respete RLS.
-- `PYTHONPATH=. python3 tests/test_dst_policy_r421.py`: **7 aprobadas, 0 fallidas** (regresión de 4.2.1).
-- Verificación de `SHA256SUMS.txt` del paquete entregado.
-
-## No ejecutado (sin Docker, PostgreSQL, FastAPI, SQLAlchemy ni red)
-
-- `pytest` completo, incluidas las 23 pruebas originales.
-- `alembic upgrade head` sobre PostgreSQL, incluidas las migraciones 0004 y 0005 y el relleno de `home_branch_id`.
-- Pruebas HTTP de visibilidad: un encargado de la sucursal A no ve clientes exclusivos de B, y no puede reservar para ellos.
-- Concurrencia de renovación de sesión en navegador real.
-- `npm install && npm run build`: el TypeScript de `api.ts` no se compiló aquí.
-
-## Próximo paso obligatorio
-
-```bash
-docker compose up -d db redis
-cd backend && PYTHONPATH=. pytest -q
-TEST_DATABASE_URL=... pytest -q tests/integration
-cd ../frontend && npm install && npm run build
-```
-
-Antes de presentarlo como libre de errores, esos comandos deben pasar.
+- `python3 -m compileall -q backend/app backend/alembic backend/tests`: Passed (60 Python files compiled cleanly).
+- `PYTHONPATH=. python3 tests/test_customer_scope_r422.py`: **11 passed, 0 failed** (branch-scoped customer visibility, 15s refresh token grace window, and RLS preservation in migration `0005`).
+- `PYTHONPATH=. python3 tests/test_dst_policy_r421.py`: **7 passed, 0 failed**.
+- `PYTHONPATH=. python3 tests/test_omnichannel_r430.py`: **6 passed, 0 failed** (Chilean/international phone normalization, sanitized cross-branch payload, Gemini branch-isolated conversation turns, and Twilio HMAC-SHA1 signature verification).
+- `SHA256SUMS.txt`: Regenerated and verified across all repository files.

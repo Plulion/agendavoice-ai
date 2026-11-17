@@ -1,6 +1,6 @@
-"""Pruebas de la regla de clientes por sucursal y de la ventana de reuso de refresh (R4.2.2).
+"""Unit tests for branch-scoped customer visibility and refresh token reuse grace window (R4.2.2).
 
-Solo biblioteca estándar. Las pruebas de PostgreSQL están en tests/integration.
+Pure standard library tests. Live PostgreSQL integration tests reside in tests/integration.
 """
 from datetime import datetime, timedelta, timezone
 from pathlib import Path

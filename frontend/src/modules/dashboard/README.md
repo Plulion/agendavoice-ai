@@ -1,1 +1,3 @@
-# Dashboard\n\nÁrea reservada para la evolución del panel administrativo AgendaVoice AI.\n
+# Dashboard UI Module
+
+Reserved directory for branch KPIs and operational metrics in the React admin console.

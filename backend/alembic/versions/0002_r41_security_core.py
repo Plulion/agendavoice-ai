@@ -1,4 +1,4 @@
-"""R4.1: identidad, sesiones rotativas, roles, RLS y relaciones tenant-safe."""
+"""R4.1: identity lookup, rotating refresh sessions, RBAC, FORCE RLS, and composite tenant-safe FKs."""
 from alembic import op
 import sqlalchemy as sa
 
@@ -41,26 +41,25 @@ def _preflight(bind):
 
 
 def upgrade():
-    # El tenant raíz queda bajo RLS. En registro, la API reserva primero el ID
-    # de secuencia, establece el GUC y luego inserta la fila con ese ID.
+    # Root tenants table is protected by RLS. On registration, the API reserves the sequence ID,
+    # sets app.tenant_id, and then inserts the row.
     op.execute("ALTER TABLE tenants ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE tenants FORCE ROW LEVEL SECURITY")
     op.execute("CREATE POLICY tenant_isolation ON tenants USING (id = NULLIF(current_setting('app.tenant_id', true), '')::integer) WITH CHECK (id = NULLIF(current_setting('app.tenant_id', true), '')::integer)")
 
-    # R4.0 tenía FORCE RLS en las tablas de tenant. Se desactiva solo dentro de
-    # esta transacción de migración para verificar/backfill de datos existentes.
+    # Temporarily disable RLS inside this DDL transaction to run preflight checks and backfill.
     op.execute("DROP POLICY IF EXISTS tenant_isolation ON users")
     for table in BACKFILL_TABLES:
         op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
     _preflight(op.get_bind())
 
-    # Correo normalizado y unicidad global del índice de identidad.
+    # Normalize email to lowercase and enforce composite tenant uniqueness.
     op.execute("UPDATE users SET email = lower(email)")
     op.drop_constraint("users_email_key", "users", type_="unique")
     op.create_unique_constraint("uq_users_tenant_email", "users", ["tenant_id", "email"])
     op.create_check_constraint("ck_users_role", "users", "role IN ('SUPER_ADMIN', 'TENANT_ADMIN', 'BRANCH_MANAGER', 'OPERATOR', 'READ_ONLY')")
 
-    # Claves compuestas: una relación nunca puede apuntar a una fila de otro tenant.
+    # Composite unique keys so foreign keys can never reference rows from another tenant.
     op.create_unique_constraint("uq_users_tenant_id", "users", ["tenant_id", "id"])
     op.create_unique_constraint("uq_branches_tenant_id", "branches", ["tenant_id", "id"])
     op.create_unique_constraint("uq_customers_tenant_id", "customers", ["tenant_id", "id"])
@@ -76,7 +75,7 @@ def upgrade():
     op.create_index("ix_auth_identities_tenant_id", "auth_identities", ["tenant_id"])
     op.execute("INSERT INTO auth_identities (email, user_id, tenant_id) SELECT lower(email), id, tenant_id FROM users")
 
-    # Reemplaza FKs simples por FKs compuestas tenant-safe.
+    # Replace simple FKs with composite tenant-safe foreign keys.
     op.drop_constraint("staff_branch_id_fkey", "staff", type_="foreignkey")
     op.create_foreign_key("fk_staff_tenant_branch", "staff", "branches",
         ["tenant_id", "branch_id"], ["tenant_id", "id"], ondelete="CASCADE")
@@ -99,7 +98,7 @@ def upgrade():
     op.create_index("ix_resources_branch_id", "resources", ["branch_id"])
     op.create_index("ix_appointments_branch_id", "appointments", ["branch_id"])
 
-    # Restaura y fuerza las políticas existentes de R4.0, sin el bypass auth_lookup.
+    # Re-enable and force RLS policies without the legacy auth_lookup bypass.
     for table in BACKFILL_TABLES:
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
@@ -133,8 +132,7 @@ def upgrade():
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
         op.execute(f"CREATE POLICY tenant_isolation ON {table} USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::integer) WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::integer)")
 
-    # auth_identities solo expone el índice mínimo de login; no permite modificarlo
-    # ni borrarlo directamente desde el runtime.
+    # auth_identities only exposes the minimal login lookup index; revoke UPDATE/DELETE from runtime role.
     op.execute("REVOKE UPDATE, DELETE ON auth_identities FROM agendavoice_app")
     op.execute("GRANT SELECT, INSERT ON auth_identities TO agendavoice_app")
 
@@ -170,6 +168,6 @@ def downgrade():
     op.drop_constraint("ck_users_role", "users", type_="check")
     op.drop_constraint("uq_users_tenant_email", "users", type_="unique")
     op.create_unique_constraint("users_email_key", "users", ["email"])
-    # Compatibilidad con el login histórico R4.0 al volver atrás.
+    # Restore legacy R4.0 login policy on downgrade.
     op.execute("DROP POLICY IF EXISTS tenant_isolation ON users")
     op.execute("CREATE POLICY tenant_isolation ON users USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::integer OR current_setting('app.auth_lookup', true) = 'on') WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::integer)")

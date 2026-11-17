@@ -1,1 +1,3 @@
-# Calendar\n\nÁrea reservada para la evolución del panel administrativo AgendaVoice AI.\n
+# Calendar UI Module
+
+Reserved directory for interactive multi-staff and multi-resource calendar views in the React admin console.

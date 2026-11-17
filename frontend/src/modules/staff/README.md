@@ -1,1 +1,3 @@
-# Staff\n\nÁrea reservada para la evolución del panel administrativo AgendaVoice AI.\n
+# Staff UI Module
+
+Reserved directory for professional roster and custom schedule views in the React admin console.

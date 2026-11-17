@@ -1,8 +1,8 @@
-"""Agente conversacional Gemini 2.5 Flash con aislamiento estricto por sucursal (R4.3.0).
+"""Branch-scoped Gemini 2.5 Flash conversational agent (R4.3.0).
 
-Opera siempre dentro del contexto RLS del tenant (`app.tenant_id`) y restringe
-todas las herramientas de consulta y agendamiento al `branch_id` de la sucursal
-que recibe la llamada o mensaje de WhatsApp.
+Operates strictly inside the authenticated tenant's RLS context (`app.tenant_id`)
+and restricts all availability and booking tools to the `branch_id` receiving the
+voice call or WhatsApp message.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from app.modules.customers.visibility import normalize_phone
 
 
 def build_branch_system_prompt(company_name: str, branch_name: str, timezone_name: str) -> str:
-    """Construye el system_instruction acotado exclusivamente a una sucursal."""
+    """Build the system instruction scoped exclusively to a single branch."""
     return (
         f"Eres la recepcionista virtual de IA de {company_name}, atendiendo exclusivamente "
         f"la sucursal '{branch_name}' (zona horaria {timezone_name}). "
@@ -23,7 +23,7 @@ def build_branch_system_prompt(company_name: str, branch_name: str, timezone_nam
 
 
 def parse_natural_intent(message: str) -> dict:
-    """Analizador determinista de respaldo cuando GEMINI_API_KEY no está configurada en local."""
+    """Deterministic fallback intent parser when GEMINI_API_KEY is not set locally."""
     text = (message or "").strip().lower()
     if any(k in text for k in ("cancelar", "anular", "cancel")):
         return {"intent": "cancel"}
@@ -45,7 +45,7 @@ def run_branch_conversation_turn(
     check_availability_fn: Callable[[], list[dict]],
     book_appointment_fn: Callable[[], dict] | None = None,
 ) -> dict:
-    """Ejecuta un turno conversacional (Voz o WhatsApp) acotado a la sucursal."""
+    """Execute a branch-isolated conversational turn (Voice or WhatsApp)."""
     clean_phone = normalize_phone(sender_phone)
     parsed = parse_natural_intent(message)
     intent = parsed["intent"]

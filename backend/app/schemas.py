@@ -55,7 +55,7 @@ class CustomerIn(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     phone: str = Field(min_length=6, max_length=40)
     email: EmailStr | None = None
-    # Opcional. Para usuarios con acceso parcial se usa su única sucursal si no se indica.
+    # Optional. For single-branch operators, defaults to their assigned branch automatically.
     branch_id: int | None = None
 class PhoneResolveIn(BaseModel):
     branch_id: int
@@ -109,7 +109,7 @@ class ResourceIn(BaseModel):
 
 
 class WeeklyHoursIn(BaseModel):
-    weekday: int = Field(ge=0, le=6, description="Lunes=0 ... domingo=6")
+    weekday: int = Field(ge=0, le=6, description="Monday=0 ... Sunday=6")
     is_closed: bool = False
     opens_at: time | None = None
     closes_at: time | None = None

@@ -1,10 +1,11 @@
-"""Reglas puras de agenda. Todos los horarios de configuración son locales;
-los intervalos de reservas son aware y se persisten en UTC.
+"""Pure scheduling & timezone calculation rules.
 
-Política DST (R4.2.1): una hora local inexistente no es reservable y una hora
-local ambigua (ocurre dos veces al atrasar el reloj) tampoco se ofrece. Se
-omite la oferta en lugar de elegir una ocurrencia en silencio. Ver
-docs/scheduling/DST_POLICY.md.
+All weekly schedule configurations are naive local wall-clock times; all booked
+appointment intervals are timezone-aware and persisted in UTC.
+
+DST Policy (R4.2.1+): Nonexistent local times (spring-forward gaps) and ambiguous
+local times (fall-back folds that occur twice) are rejected rather than silently
+guessed. See docs/scheduling/DST_POLICY.md.
 """
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -30,7 +31,7 @@ def valid_timezone(name: str) -> ZoneInfo:
     try:
         return ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError):
-        raise ValueError(f"Zona horaria IANA inválida: {name}")
+        raise ValueError(f"Invalid IANA timezone: {name}")
 
 
 def interval_fits_schedule(
@@ -40,10 +41,10 @@ def interval_fits_schedule(
     hours: list[WeeklyWindow],
     breaks: list[WeeklyBreak] | None = None,
 ) -> bool:
-    """True si el intervalo completo cabe en una ventana y no cruza pausas.
+    """Return True if the full interval fits inside an open window without crossing breaks.
 
-    No se permiten servicios que atraviesen medianoche: deben configurarse como
-    dos turnos separados para que los cambios DST y los cierres sean explícitos.
+    Appointments crossing local midnight are rejected so DST transitions and daily
+    closing boundaries remain explicit.
     """
     if starts_at_utc.tzinfo is None or ends_at_utc.tzinfo is None:
         return False
@@ -68,10 +69,10 @@ def interval_fits_schedule(
 
 
 def local_slot_to_utc(day: date, clock: time, timezone_name: str) -> datetime | None:
-    """Convierte una hora de pared local a UTC de forma única.
+    """Unambiguously convert a local wall-clock time to UTC.
 
-    Devuelve None si la hora no existe (salto de DST) o es ambigua (se repite
-    al atrasar el reloj). Solo una ocurrencia unívoca puede reservarse.
+    Returns None if the local time does not exist (spring-forward gap) or is
+    ambiguous (fall-back fold occurring twice).
     """
     zone = valid_timezone(timezone_name)
     naive = datetime.combine(day, clock)
@@ -79,7 +80,7 @@ def local_slot_to_utc(day: date, clock: time, timezone_name: str) -> datetime | 
     for fold in (0, 1):
         local = naive.replace(tzinfo=zone, fold=fold)
         utc = local.astimezone(timezone.utc)
-        # Una ocurrencia es válida solo si al volver a hora local da la misma hora de pared.
+        # Valid only if round-tripping back to local time yields the exact same wall clock.
         if utc.astimezone(zone).replace(tzinfo=None) == naive:
             candidates.add(utc)
     if len(candidates) != 1:
@@ -88,7 +89,7 @@ def local_slot_to_utc(day: date, clock: time, timezone_name: str) -> datetime | 
 
 
 def is_ambiguous_local(day: date, clock: time, timezone_name: str) -> bool:
-    """True si la hora local existe dos veces (atraso de reloj)."""
+    """Return True if the local wall-clock time occurs twice (DST fall-back)."""
     zone = valid_timezone(timezone_name)
     naive = datetime.combine(day, clock)
     valid = set()

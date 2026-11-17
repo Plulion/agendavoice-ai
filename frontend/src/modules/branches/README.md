@@ -1,1 +1,3 @@
-# Branches\n\nÁrea reservada para la evolución del panel administrativo AgendaVoice AI.\n
+# Branches UI Module
+
+Reserved directory for dedicated branch management and weekly schedule configuration views in the React admin console.

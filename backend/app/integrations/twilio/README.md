@@ -1,3 +1,3 @@
-# Twilio Voice — integración pendiente
+# Twilio Voice & WhatsApp Webhook Adapter (`R4.3.0`)
 
-La configuración de credenciales está reservada en `.env.example`. Este hito no implementa todavía el webhook firmado, streaming de audio, manejo de llamadas ni validación `X-Twilio-Signature`. No conectar un número productivo hasta implementar validación criptográfica, HTTPS, protección contra replay, consentimiento y pruebas de extremo a extremo.
+`webhooks.py` provides sender normalization (`extract_channel_and_phone` for `whatsapp:+569...` and voice numbers) and cryptographic `X-Twilio-Signature` HMAC-SHA1 request verification (`verify_twilio_signature`).

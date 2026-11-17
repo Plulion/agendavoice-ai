@@ -1,7 +1,6 @@
-"""Política DST R4.2.1 (horas ambiguas y nuevas) y limitador de intentos.
+"""Unit tests for DST policy (ambiguous and nonexistent local hours) and FixedWindowLimiter (R4.2.1).
 
-Solo usa la biblioteca estándar y módulos sin dependencias externas, por lo que
-se puede ejecutar también fuera de Docker.
+Uses only the Python standard library so it can run standalone outside Docker.
 """
 from datetime import date, time, timezone
 from app.modules.scheduling.availability import local_slot_to_utc, is_ambiguous_local
@@ -11,19 +10,19 @@ TZ = "America/Santiago"
 
 
 def test_ambiguous_hour_is_rejected_not_silently_resolved():
-    # 4 abr 2026: a las 24:00 Santiago atrasa a 23:00; 23:30 ocurre dos veces.
+    # Apr 4, 2026: Santiago clocks fall back at midnight; 23:30 occurs twice (ambiguous).
     assert is_ambiguous_local(date(2026, 4, 4), time(23, 30), TZ) is True
     assert local_slot_to_utc(date(2026, 4, 4), time(23, 30), TZ) is None
 
 
 def test_nonexistent_hour_is_rejected():
-    # 6 sep 2026: la hora 00:xx no existe (adelanto a 01:00).
+    # Sep 6, 2026: 00:xx does not exist in Santiago (clocks spring forward to 01:00).
     assert is_ambiguous_local(date(2026, 9, 6), time(0, 30), TZ) is False
     assert local_slot_to_utc(date(2026, 9, 6), time(0, 30), TZ) is None
 
 
 def test_unambiguous_hour_converts_once_to_utc():
-    # Mayo 2026 (invierno, UTC-4): 10:00 local = 14:00 UTC.
+    # May 2026 (Chile standard time, UTC-4): 10:00 local = 14:00 UTC.
     result = local_slot_to_utc(date(2026, 5, 10), time(10, 0), TZ)
     assert result is not None
     assert result.astimezone(timezone.utc).hour == 14
@@ -35,7 +34,7 @@ def test_limiter_blocks_after_limit_and_resets_next_window():
     limiter = FixedWindowLimiter(redis_client=None, clock=lambda: now[0])
     assert [limiter.hit("k", 3, 60) for _ in range(3)] == [True, True, True]
     assert limiter.hit("k", 3, 60) is False
-    now[0] += 60  # nueva ventana
+    now[0] += 60  # advance to next window
     assert limiter.hit("k", 3, 60) is True
 
 

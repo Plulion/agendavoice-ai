@@ -1,8 +1,7 @@
-"""R4.2.1: auditoría de solo inserción para el rol de runtime.
+"""R4.2.1: Enforce append-only audit_logs for the runtime database role.
 
-Antes, los privilegios por defecto de infra/postgres/init.sql daban UPDATE y DELETE
-sobre todas las tablas al rol agendavoice_app, incluida audit_logs. Un fallo de
-aplicación o una inyección SQL podía borrar el rastro de auditoría.
+Revokes UPDATE and DELETE on audit_logs from agendavoice_app so application bugs
+or compromised runtime queries cannot alter or erase historical audit records.
 """
 from alembic import op
 
@@ -13,7 +12,7 @@ depends_on = None
 
 
 def upgrade():
-    # DO $$ evita fallar en entornos de prueba donde el rol de runtime aún no existe.
+    # Guard with pg_roles check so migrations succeed even if the runtime role is created later.
     op.execute("""
         DO $$
         BEGIN

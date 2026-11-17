@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
-  echo "ERROR: define TEST_DATABASE_URL apuntando a una base PostgreSQL de pruebas ya migrada." >&2
+  echo "ERROR: set TEST_DATABASE_URL pointing to an already-migrated PostgreSQL test database." >&2
   exit 2
 fi
 cd "$(dirname "$0")/../backend"

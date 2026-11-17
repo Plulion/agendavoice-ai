@@ -1,7 +1,7 @@
-"""Pruebas unitarias de R4.3.0:
-- Resolución segura de clientes entre sucursales por teléfono exacto (Blind Upsert)
-- Agente conversacional Gemini acotado por sucursal
-- Verificación criptográfica de webhooks de WhatsApp / Voz (Twilio HMAC-SHA1)
+"""Unit tests for R4.3.0:
+- Cross-branch customer resolution by exact phone number (Blind Upsert)
+- Branch-scoped Gemini conversational agent turns
+- Cryptographic WhatsApp / Voice webhook signature verification (Twilio HMAC-SHA1)
 """
 from pathlib import Path
 from app.modules.customers.visibility import (
@@ -38,9 +38,9 @@ def test_cross_branch_sanitized_payload_hides_other_branch_metadata():
 
 
 def test_customer_becomes_visible_to_branch_b_after_blind_upsert_booking():
-    # Antes de agendar en Sucursal 2 (cliente registrado en Sucursal 1): no visible en listados de Sucursal 2
+    # Before booking in Branch 2 (customer registered at Branch 1): not visible in Branch 2 directory
     assert customer_visible([2], home_branch_id=1, visited_branch_ids=[1]) is False
-    # Después de agendar por teléfono exacto en Sucursal 2: pasa a ser visible en Sucursal 2
+    # After booking via exact phone Blind Upsert in Branch 2: becomes visible in Branch 2
     assert customer_visible([2], home_branch_id=1, visited_branch_ids=[1, 2]) is True
 
 
@@ -85,7 +85,7 @@ def test_whatsapp_and_voice_webhook_extraction_and_signature():
     assert v_channel == "VOICE"
     assert v_phone == "+56999887766"
 
-    # Verifica firma HMAC-SHA1
+    # Verify HMAC-SHA1 signature
     url = "https://api.webfinanzas.cl/webhooks/whatsapp"
     params = {"From": "whatsapp:+56911223344", "Body": "Hola"}
     token = "super_secret_twilio_token"

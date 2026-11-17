@@ -51,7 +51,7 @@ class Appointment(Base):
         ForeignKeyConstraint(["tenant_id", "branch_id", "resource_id"], ["resources.tenant_id", "resources.branch_id", "resources.id"], name="fk_appointment_tenant_branch_resource"),
     )
 
-# Horarios semanales expresados en la hora local de la sucursal.
+# Weekly schedules expressed in the branch's local IANA wall-clock time.
 from sqlalchemy import Time, Index
 
 class BranchHours(Base):
@@ -59,7 +59,7 @@ class BranchHours(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
     branch_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    weekday: Mapped[int] = mapped_column(Integer, nullable=False)  # lunes=0 ... domingo=6
+    weekday: Mapped[int] = mapped_column(Integer, nullable=False)  # Monday=0 ... Sunday=6
     opens_at: Mapped[object | None] = mapped_column(Time)
     closes_at: Mapped[object | None] = mapped_column(Time)
     is_closed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

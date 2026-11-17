@@ -1,1 +1,3 @@
-# Services\n\nÁrea reservada para la evolución del panel administrativo AgendaVoice AI.\n
+# Services UI Module
+
+Reserved directory for service catalog management in the React admin console.

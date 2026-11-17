@@ -1,1 +1,3 @@
-# Vertical spa\n\nVertical reservado para una etapa posterior. No contiene lógica productiva todavía.\n
+# Spa & Wellness Vertical
+
+Reserved vertical module for cabins, equipment, and multi-resource wellness treatments.

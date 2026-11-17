@@ -1,4 +1,4 @@
-"""R4.2: horarios, pausas, disponibilidad, cancelación y exclusión concurrente."""
+"""R4.2: weekly schedules, breaks, availability, cancellation, and GiST exclusion constraints."""
 from alembic import op
 import sqlalchemy as sa
 
@@ -114,10 +114,9 @@ def _create_break_table(name, entity_columns, foreign_keys):
 def upgrade():
     bind = op.get_bind()
 
-    # btree_gist permite combinar igualdad de tenant/identificador con solapamiento temporal.
+    # btree_gist enables combining scalar equality (tenant_id, staff_id/resource_id) with tstzrange overlap.
     op.execute("CREATE EXTENSION IF NOT EXISTS btree_gist")
-    # FORCE RLS también afecta al propietario durante la migración. Se desactiva
-    # solo dentro de esta transacción DDL para validar todas las filas existentes.
+    # Temporarily disable RLS inside this DDL migration transaction to run preflight checks.
     op.execute("ALTER TABLE appointments DISABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE services DISABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE branches DISABLE ROW LEVEL SECURITY")
@@ -141,7 +140,7 @@ def upgrade():
     op.create_check_constraint("ck_service_duration_range", "services",
         "duration_minutes BETWEEN 1 AND 600 AND buffer_minutes BETWEEN 0 AND 180")
 
-    # La sucursal forma parte de la identidad relacional del profesional/recurso.
+    # Include branch_id in composite unique and foreign keys for staff and resources.
     op.create_unique_constraint("uq_staff_tenant_branch_id", "staff", ["tenant_id", "branch_id", "id"])
     op.create_unique_constraint("uq_resources_tenant_branch_id", "resources", ["tenant_id", "branch_id", "id"])
     op.drop_constraint("fk_appointment_tenant_staff", "appointments", type_="foreignkey")
@@ -169,8 +168,7 @@ def upgrade():
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
         op.execute(f"CREATE POLICY tenant_isolation ON {table} USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::integer) WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::integer)")
 
-    # Defensa definitiva a nivel DB; los advisory locks de la API reducen la
-    # contención, pero estas exclusiones son la garantía incluso entre procesos.
+    # Physical database-level exclusion constraints preventing overlapping active appointments.
     op.execute("""ALTER TABLE appointments ADD CONSTRAINT ex_appointments_staff_no_overlap
         EXCLUDE USING gist (tenant_id WITH =, staff_id WITH =,
         tstzrange(starts_at, ends_at, '[)') WITH &&)

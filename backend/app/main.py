@@ -32,11 +32,11 @@ from app.schemas import (RegisterIn, LoginIn, RefreshIn, TokenOut, UserCreateIn,
 from app.modules.customers.visibility import normalize_phone, sanitize_cross_branch_customer
 from app.integrations.gemini.agent import run_branch_conversation_turn
 
-app = FastAPI(title="AgendaVoice AI API", version="4.3.0", description="Motor universal de agenda multiempresa")
+app = FastAPI(title="AgendaVoice AI API", version="4.3.0", description="Universal multi-tenant & multi-branch scheduling engine")
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"], allow_headers=["Authorization", "Content-Type"])
 
-# Límites por IP/correo en endpoints de autenticación. Redis comparte el contador entre procesos.
+# Fixed-window rate limiter by IP/email on authentication endpoints. Backed by Redis across workers.
 _limiter = FixedWindowLimiter(redis_client=Redis.from_url(settings.redis_url, socket_connect_timeout=0.5, socket_timeout=0.5))
 
 
@@ -73,7 +73,7 @@ def enforce_rate_limit(key: str, limit: int, window_seconds: int) -> None:
 
 
 def _customer_scope(db, user, query):
-    """Filtra clientes por acceso: admins ven todos; el resto, los de sus sucursales."""
+    """Filter customers by branch scope: tenant admins see all; branch roles see only their branches."""
     allowed = accessible_branch_ids(db, user)
     if allowed is None:
         return query
@@ -85,7 +85,7 @@ def _customer_scope(db, user, query):
 
 
 def _customer_visible(db, user, customer) -> bool:
-    """Misma regla que _customer_scope, para un cliente concreto (ver modules/customers/visibility.py)."""
+    """Evaluate branch visibility for a single customer record (see modules/customers/visibility.py)."""
     allowed = accessible_branch_ids(db, user)
     if allowed is None:
         return True
@@ -105,9 +105,9 @@ def _resolve_or_create_customer_by_phone(
     name: str | None = None,
     email: str | None = None,
 ) -> tuple[Customer, bool]:
-    """Estándar de industria (Blind Upsert): busca por teléfono exacto dentro del tenant
-    o crea el cliente asignándole la sucursal actual como home_branch_id.
-    Retorna (customer, was_existing_other_branch).
+    """Industry-standard Blind Upsert: resolve customer by exact normalized phone within the tenant
+    or create a new customer assigned to the current branch as home_branch_id.
+    Returns (customer, was_existing_other_branch).
     """
     assert_branch_access(db, user, branch_id)
     clean_phone = normalize_phone(phone) or phone.strip()
@@ -245,7 +245,7 @@ def register(data: RegisterIn, request: Request, db: Session = Depends(get_db)):
     if db.query(AuthIdentity).filter(AuthIdentity.email == email).first():
         raise HTTPException(409, "El correo ya está registrado")
     try:
-        # Reserva primero el ID para poder establecer RLS antes de insertar tenants.
+        # Reserve sequence ID first so app.tenant_id GUC can be set before inserting into RLS-protected tenants.
         tenant_id = db.execute(text("SELECT nextval(pg_get_serial_sequence('tenants', 'id'))")).scalar_one()
         set_tenant_context(db, tenant_id)
         tenant = Tenant(id=tenant_id, name=data.company_name.strip(), slug=slug)
@@ -271,8 +271,8 @@ def login(data: LoginIn, request: Request, db: Session = Depends(get_db)):
     email = str(data.email).lower()
     enforce_rate_limit(f"login-ip:{client_ip(request)}", 20, 60)
     enforce_rate_limit(f"login-email:{email}", 10, 900)
-    # Este índice contiene únicamente email/user_id/tenant_id. La contraseña y el
-    # registro completo se consultan después de establecer el tenant bajo RLS.
+    # This lookup table stores only email/user_id/tenant_id. Password hash and
+    # user profile are queried only after activating the tenant RLS context.
     identity = db.query(AuthIdentity).filter(AuthIdentity.email == email).first()
     if not identity:
         raise HTTPException(401, "Credenciales incorrectas")
@@ -306,9 +306,9 @@ def refresh(data: RefreshIn, request: Request, db: Session = Depends(get_db)):
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id, Tenant.status == "ACTIVE").first()
     if session is not None and session.revoked_at is not None and user is not None:
         if is_concurrent_reuse(session.revoked_at, now):
-            # Renovación casi simultánea (otra pestaña): se rechaza sin cerrar sesiones.
+            # Concurrent refresh within grace window (another tab): reject without revoking active sessions.
             raise HTTPException(401, "Sesión de renovación revocada o expirada")
-        # Reuso fuera de la ventana: se asume robo y se cierran todas las sesiones del usuario.
+        # Reuse outside grace window: assume token theft and revoke all active sessions for the user.
         db.query(RefreshSession).filter(RefreshSession.tenant_id == tenant_id,
             RefreshSession.user_id == user_id, RefreshSession.revoked_at.is_(None)).update(
             {"revoked_at": now}, synchronize_session=False)
@@ -592,7 +592,7 @@ def create_customer(data: CustomerIn, user: User = Depends(require_roles(
         db.refresh(obj)
     except IntegrityError:
         db.rollback()
-        # Mensaje genérico: no confirma datos de otros clientes de la empresa.
+        # Generic 409 message: does not leak customer fields belonging to other branches.
         raise HTTPException(409, "El teléfono ya está registrado en la empresa; un administrador debe revisarlo")
     return obj
 
@@ -610,8 +610,8 @@ def resolve_customer_by_phone(
     user: User = Depends(require_roles("TENANT_ADMIN", "SUPER_ADMIN", "BRANCH_MANAGER", "OPERATOR")),
     db: Session = Depends(get_db),
 ):
-    """Permite a una sucursal vincular o crear un cliente por su teléfono exacto sin depender del administrador
-    y sin exponer el historial de otras sucursales (protegido contra enumeración mediante rate limit).
+    """Allow a branch to resolve or create a customer by exact phone number without admin intervention
+    and without exposing history from other branches (protected against enumeration via rate limiting).
     """
     enforce_rate_limit(f"resolve-phone:{user.tenant_id}:{user.id}:{client_ip(request)}", 15, 60)
     assert_branch_access(db, user, data.branch_id)
@@ -653,8 +653,8 @@ def create_appointment(data: AppointmentIn, user: User = Depends(require_roles(
         raise HTTPException(404, "Sucursal, cliente o servicio no encontrado")
     customer = None
     if data.customer_phone:
-        # Blind Upsert por teléfono exacto: permite agendar en Sucursal B a un cliente de Sucursal A
-        # sin exponer su historial previo ni requerir intervención del administrador.
+        # Blind Upsert by exact phone: allows Branch B to book a customer originally registered at Branch A
+        # without exposing prior Branch A history or requiring administrator intervention.
         customer, _ = _resolve_or_create_customer_by_phone(
             db, user, branch.id, data.customer_phone, data.customer_name,
             str(data.customer_email) if data.customer_email else None,
@@ -663,7 +663,7 @@ def create_appointment(data: AppointmentIn, user: User = Depends(require_roles(
         customer = db.query(Customer).filter(Customer.id == data.customer_id,
             Customer.tenant_id == user.tenant_id).first()
         if customer is not None and not _customer_visible(db, user, customer):
-            customer = None  # se responde como no encontrado para no revelar IDs secuenciales de otras sucursales
+            customer = None  # return generic 404 so sequential customer IDs from other branches cannot be enumerated
     service = db.query(Service).filter(Service.id == data.service_id,
         Service.tenant_id == user.tenant_id, Service.active.is_(True)).first()
     if not branch or not customer or not service:
@@ -688,8 +688,8 @@ def create_appointment(data: AppointmentIn, user: User = Depends(require_roles(
     if not fits:
         raise HTTPException(409, reason)
 
-    # Advisory locks ordenados evitan carreras entre solicitudes de la API;
-    # las EXCLUDE constraints de PostgreSQL son la garantía final entre procesos.
+    # Ordered transaction advisory locks serialize API requests;
+    # PostgreSQL EXCLUDE USING gist constraints provide the physical cross-process guarantee.
     lock_keys = []
     if data.staff_id is not None:
         lock_keys.append(f"tenant:{user.tenant_id}:branch:{branch.id}:staff:{data.staff_id}")
@@ -783,8 +783,8 @@ def get_availability(day: date, branch_id: int, service_id: int, staff_id: int |
         zone = ZoneInfo(branch.timezone)
     except (ZoneInfoNotFoundError, ValueError):
         raise HTTPException(409, "La sucursal tiene una zona horaria inválida; corrígela antes de consultar disponibilidad")
-    # Ventana UTC amplia: la medianoche local puede no existir por DST. El solapamiento
-    # exacto se valida después para cada intervalo.
+    # Wide UTC query window: local midnight may not exist during DST transitions.
+    # Exact interval overlap is validated per slot afterwards.
     day_start_utc = datetime.combine(day - timedelta(days=1), time(0), tzinfo=timezone.utc)
     day_end_utc = datetime.combine(day + timedelta(days=2), time(0), tzinfo=timezone.utc)
     collision_filters = []
@@ -842,8 +842,8 @@ def omnichannel_turn(
     user: User = Depends(require_roles("TENANT_ADMIN", "SUPER_ADMIN", "BRANCH_MANAGER", "OPERATOR")),
     db: Session = Depends(get_db),
 ):
-    """Ejecuta un turno del agente conversacional (Voz con Gemini o WhatsApp)
-    estrictamente aislado a la sucursal indicada.
+    """Execute a conversational AI turn (Gemini Voice or WhatsApp)
+    strictly isolated to the specified branch.
     """
     assert_branch_access(db, user, data.branch_id)
     tenant = db.query(Tenant).filter_by(id=user.tenant_id, status="ACTIVE").first()

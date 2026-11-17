@@ -1,1 +1,3 @@
-# Vertical rentacar\n\nVertical reservado para migrar reglas y atributos de vehículos fuera del núcleo universal.\n
+# Rent-a-Car Vertical
+
+Reserved vertical module for fleet-specific attributes and vehicle rental rules built on top of the universal scheduling core.

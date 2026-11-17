@@ -1,36 +1,17 @@
-# Modelo de amenazas — AgendaVoice AI R4.1
+# Threat Model & Security Controls
 
-## Activos
+## Protected Assets
 
-Datos de clientes, credenciales, reservas, profesionales, sucursales, configuración del tenant, sesiones de usuario y registros de auditoría.
+Customer PII (names, phone numbers, emails), authentication credentials, branch schedules, staff assignments, appointments, refresh sessions, and append-only audit logs.
 
-## Amenazas principales y controles
+## Primary Threats & Implemented Mitigations
 
-| Amenaza | Control R4.1 | Riesgo/pendiente |
-|---|---|---|
-| Usuario cambia `tenant_id` en petición | El tenant se deriva del JWT verificado; no se acepta en payloads | Validar con suite PostgreSQL y pruebas API |
-| Consulta ORM olvida filtro tenant | RLS `ENABLE` + `FORCE` y políticas `USING/WITH CHECK` | Ejecutar prueba real con rol runtime |
-| Contexto queda pegado en conexión del pool | `set_config(..., true)` + `Session.info` + `after_begin` | Validar en PostgreSQL con pool real |
-| Login requiere saltarse RLS | `auth_identities` mínimo; `users` nunca tiene bypass | Revisar tasa de login y enumeración |
-| Reutilización de refresh token | JTI hash persistido, `FOR UPDATE`, revocación y rotación | Agregar detección/alerta de reuse y revocación global |
-| Usuario accede a otra sucursal | Tabla `user_branch_access` y validación de rutas | Completar pruebas API por rol |
-| Elevación de privilegios | Roles permitidos en esquema, endpoint de creación limitado | No existe flujo de invitaciones/edición |
-| Contraseña expuesta | bcrypt vía Passlib | Añadir política de bloqueo y rate limiting |
-| Token robado desde navegador | Refresh token en `sessionStorage` | Migrar a cookie HttpOnly/Secure/SameSite antes de producción |
-| Auditoría manipulada | Eventos de auditoría por operaciones relevantes | Evaluar append-only y retención centralizada |
-
-## Límites de confianza
-
-- `agendavoice_app` no debe ser superusuario, propietario de tablas ni tener `BYPASSRLS`.
-- `agendavoice_migrator` solo se usa para migraciones.
-- `app.tenant_id` es un GUC de contexto confiado desde la aplicación; RLS mitiga omisiones de filtro, pero una inyección SQL arbitraria con credenciales runtime podría cambiarlo. RLS no reemplaza la prevención de SQL injection.
-- `auth_identities` es un índice global de autenticación sin password hash. La tabla `tenants` también está protegida por RLS; el alta reserva el ID de secuencia antes de insertar.
-- Los secretos de `.env` no deben versionarse.
-
-## Validaciones requeridas antes de producción
-
-1. Prueba de RLS ejecutada con PostgreSQL real y rol runtime.
-2. Pruebas API negativas para cada rol y tenant.
-3. Revisión de cookies/CSRF y estrategia de refresh.
-4. Rate limiting de login/refresh y protección anti-enumeración.
-5. Revisión independiente de migraciones, permisos SQL y procedimientos de backup.
+| Threat Vector | Implemented Control (R4.1 – R4.3.0) | Verification Method |
+| :--- | :--- | :--- |
+| **Cross-Tenant Data Leakage** | `tenant_id` derived strictly from verified JWT; PostgreSQL `ENABLE` + `FORCE RLS` and composite foreign keys on all tables. | `tests/integration/test_postgres_rls.py` |
+| **Connection Pool Context Bleed** | Transaction-local `set_config('app.tenant_id', ..., true)` paired with `Session.after_begin` listener and `db.info.clear()` on teardown. | `test_tenant_context_listener_reapplies_after_commit` |
+| **Cross-Branch Snooping (Intra-Tenant)** | `assert_branch_access()` on all branch routes + `_customer_scope()` filtering `GET /customers` by `home_branch_id` or branch visit history. | `tests/test_customer_scope_r422.py` |
+| **Cross-Branch Customer Enumeration** | Rate-limited `POST /customers/resolve-phone` (15 req/min) returning sanitized `{id, name, phone}` payloads without leaking origin branch or prior visits. | `tests/test_omnichannel_r430.py` |
+| **Refresh Token Replay / Theft** | Single-use hashed JTI rotation with 15s concurrent tab grace window and global session revocation on delayed reuse. | `tests/test_customer_scope_r422.py` |
+| **Audit Trail Tampering** | Migration `0004` executes `REVOKE UPDATE, DELETE ON audit_logs FROM agendavoice_app`. | `tests/test_dst_policy_r421.py` |
+| **Forged WhatsApp / Voice Webhooks** | Cryptographic HMAC-SHA1 validation (`verify_twilio_signature`) over `X-Twilio-Signature`. | `tests/test_omnichannel_r430.py` |

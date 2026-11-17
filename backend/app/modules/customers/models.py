@@ -9,7 +9,7 @@ class Customer(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     phone: Mapped[str] = mapped_column(String(40), nullable=False)
     email: Mapped[str | None] = mapped_column(String(255))
-    # Sucursal donde se registró el cliente. Permite que su encargado lo vea aunque aún no tenga reservas.
+    # Origin branch where the customer was registered. Allows that branch to view the customer before their first booking.
     home_branch_id: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (UniqueConstraint("tenant_id", "phone", name="uq_customer_tenant_phone"),

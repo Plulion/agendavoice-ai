@@ -1,3 +1,3 @@
-# Voice orchestration
+# Voice Session Orchestration
 
-El módulo reservará la coordinación de sesiones y herramientas de negocio por llamada. La integración de telefonía y el agente conversacional quedan pendientes; el modelo de negocio no debe delegar la autoridad transaccional a Gemini.
+Coordinates real-time voice call state with the branch-scoped Gemini agent (`app/integrations/gemini/agent.py`) while keeping transactional authority strictly inside PostgreSQL.

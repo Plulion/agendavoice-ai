@@ -10,11 +10,11 @@ class Base(DeclarativeBase):
 
 @event.listens_for(Session, "after_begin")
 def _apply_transaction_context(session: Session, transaction, connection) -> None:
-    """Reaplica el contexto local en CADA transacción de la sesión.
+    """Re-applies the transaction-local tenant context at the start of EVERY transaction.
 
-    PostgreSQL elimina los GUC establecidos con SET LOCAL al hacer COMMIT/ROLLBACK.
-    Guardar el tenant en session.info permite restaurarlo de forma segura al iniciar
-    la siguiente transacción, sin contaminar conexiones reutilizadas del pool.
+    PostgreSQL clears GUCs established with SET LOCAL upon COMMIT/ROLLBACK.
+    Storing tenant_id in session.info restores it safely on subsequent transactions
+    within the same request without polluting pooled connections.
     """
     tenant_id = session.info.get("tenant_id")
     if tenant_id is not None:

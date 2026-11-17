@@ -5,7 +5,7 @@ An enterprise B2B SaaS scheduling and conversational booking platform built with
 Engineered to enforce strict **tenant isolation** between companies and **branch-level operational privacy** within the same company, while enabling frictionless phone, voice AI, and WhatsApp bookings via an industry-standard **Blind Upsert** workflow.
 
 > **Interactive Architecture Showcase & Live Simulator (GitHub Pages):** Open [`docs/index.html`](docs/index.html) locally or enable **GitHub Pages** (`Settings > Pages > Branch: main /docs`) for interactive SVG diagrams, security matrices, and a live multi-branch simulator.
-> *(Spanish documentation available in [`docs/README_ES.md`](docs/README_ES.md)).*
+> **Full Technical Documentation Index:** See [`docs/README.md`](docs/README.md).
 
 ---
 

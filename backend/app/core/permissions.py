@@ -14,7 +14,7 @@ def allow_roles(*roles: str):
 
 
 def accessible_branch_ids(db: Session, user) -> list[int] | None:
-    """None significa acceso a todas las sucursales del tenant."""
+    """Returns None when the user has access to all branches in the tenant."""
     if user.role in {"SUPER_ADMIN", "TENANT_ADMIN"}:
         return None
     return [row.branch_id for row in db.query(UserBranchAccess.branch_id)

@@ -1,36 +1,17 @@
-# Política de cambio de horario (DST) — AgendaVoice AI 4.2.1
+# Daylight Saving Time (DST) Policy — AgendaVoice AI
 
-Las horas de configuración de sucursales, profesionales y recursos son horas de pared locales.
-Las reservas se guardan en UTC (`timestamptz`).
+Weekly schedules for branches, staff, and resources are configured as naive local wall-clock times (`HH:MM:SS`). Confirmed appointments are persisted in UTC (`TIMESTAMPTZ`).
 
-## Regla
+## Deterministic Conversion Rule
 
-- **Hora inexistente** (adelanto de reloj): no se ofrece ni se reserva.
-- **Hora ambigua** (atraso de reloj, la hora ocurre dos veces): no se ofrece ni se reserva.
-  La versión anterior (4.2.0) elegía la primera ocurrencia en silencio; eso se elimina.
+- **Nonexistent local time** (spring-forward gap): Never offered in availability and rejected on booking.
+- **Ambiguous local time** (fall-back fold where the same wall-clock hour occurs twice): Never offered in availability and rejected on booking.
 
-Implementación: `local_slot_to_utc` en `backend/app/modules/scheduling/availability.py` devuelve
-`None` salvo que la hora local tenga exactamente una interpretación UTC válida.
+Implementation: `local_slot_to_utc()` in `backend/app/modules/scheduling/availability.py` evaluates both `fold=0` and `fold=1` and returns `None` unless the local wall-clock time maps to **exactly one** valid UTC instant.
 
-## Efecto práctico en Santiago (Chile), 2026
+## Practical Impact in Santiago, Chile (`America/Santiago`), 2026
 
-| Fecha | Franja | Tipo | Efecto |
-|---|---|---|---|
-| sábado 4 abr 2026 | 23:00 a 23:59 | ambigua | Ya no se ofrecen slots (4 de 15 min) |
-| domingo 6 sep 2026 | 00:00 a 00:59 | inexistente | Sin slots (ya era así en 4.2.0) |
-
-Para el resto del año el comportamiento no cambia.
-
-## Recomendación operativa
-
-Evitar horarios de apertura o pausas en la franja 23:00-00:59 durante las semanas de cambio de horario.
-
-## Ventana de consulta
-
-La consulta de reservas existentes usa una ventana UTC amplia (día anterior a día siguiente),
-porque la medianoche local puede no existir. El solapamiento exacto se valida por intervalo.
-
-## Pendiente de decisión de producto
-
-Permitir que el administrador elija explícitamente la primera o la segunda ocurrencia de una hora
-ambigua. Requiere una regla de negocio; no se implementa en 4.2.1.
+| Date | Local Window | Transition Type | System Behavior |
+| :--- | :--- | :--- | :--- |
+| Saturday, Apr 4, 2026 | `23:00` – `23:59` | Ambiguous (clocks fall back) | Slots omitted / rejected (prevents silent 1-hour shift) |
+| Sunday, Sep 6, 2026 | `00:00` – `00:59` | Nonexistent (clocks spring forward) | Slots omitted / rejected |

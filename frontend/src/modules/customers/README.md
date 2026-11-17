@@ -1,1 +1,3 @@
-# Customers\n\nÁrea reservada para la evolución del panel administrativo AgendaVoice AI.\n
+# Customers UI Module
+
+Reserved directory for branch-scoped customer directory and phone lookup views in the React admin console.

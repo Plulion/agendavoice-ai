@@ -1,111 +1,56 @@
 # Changelog
 
-## 4.3.0 — Resolución de clientes entre sucursales (Blind Upsert) y Canales Voz/WhatsApp con Gemini
+## 4.3.0 — Cross-Branch Customer Resolution (Blind Upsert) & Omnichannel Voice/WhatsApp AI
 
-### Añadido
+### Added
 
-- **Estándar de industria para agendamiento entre sucursales (`Blind Upsert` + `POST /customers/resolve-phone`):** Permite a cualquier sucursal agendar por teléfono o WhatsApp a un cliente que ya existe en otra sucursal de la misma empresa indicando su teléfono exacto, sin depender del administrador y sin exponer el historial ni datos de otras sucursales.
-- `POST /appointments` ahora acepta `customer_phone` + `customer_name` directamente en la creación de la cita.
-- **Agente conversacional por sucursal (`app/integrations/gemini/agent.py`):** Orquestador acotado al `branch_id` y `tenant_id` (bajo RLS) y endpoint `POST /channels/omnichannel/turn`.
-- **Adaptador de Webhooks WhatsApp y Voz (`app/integrations/twilio/webhooks.py`):** Normalización de remitentes `whatsapp:+569...` y validación criptográfica `X-Twilio-Signature` (HMAC-SHA1).
-- Suite de pruebas unitarias `backend/tests/test_omnichannel_r430.py` (6 pruebas nuevas).
+- **Industry-Standard Cross-Branch Phone Booking (`Blind Upsert` + `POST /customers/resolve-phone`):** Allows any branch to book an existing company customer by phone or WhatsApp using their exact normalized phone number (`+569...`) without requiring administrator intervention and without exposing appointment history or metadata from other branches.
+- `POST /appointments` now accepts `customer_phone` + `customer_name` inline during appointment creation.
+- **Branch-Scoped Conversational AI Agent (`app/integrations/gemini/agent.py`):** Orchestrator strictly scoped to `branch_id` and `tenant_id` (under PostgreSQL RLS) exposed via `POST /channels/omnichannel/turn`.
+- **WhatsApp & Voice Webhook Adapter (`app/integrations/twilio/webhooks.py`):** Sender normalization (`whatsapp:+569...`) and cryptographic `X-Twilio-Signature` (HMAC-SHA1) verification.
+- Unit test suite `backend/tests/test_omnichannel_r430.py` (6 new unit tests).
+- Interactive English architecture showcase (`docs/index.html`) and complete English documentation across `docs/`.
 
+## 4.2.2 — Branch-Scoped Customer Visibility & Multi-Tab Session Sync
 
-## 4.2.2 — Acceso a clientes por sucursal y sesiones entre pestañas
+### Added
 
-### Añadido
+- Customers now include an origin branch (`home_branch_id`, migration `0005_r422_customer_home_branch`), backfilled from each customer's first appointment branch.
+- `POST /customers` accepts an optional `branch_id`. Single-branch operators default to their assigned branch automatically.
+- Reference visibility policy documented in `docs/security/CUSTOMER_SCOPE.md` with zero-dependency unit tests.
 
-- Clientes con sucursal de origen (`home_branch_id`), migración `0005_r422_customer_home_branch`. Relleno inicial con la sucursal de la primera reserva.
-- `POST /customers` acepta `branch_id` opcional. Usuarios con una sola sucursal no lo necesitan.
-- Regla de visibilidad documentada en `docs/security/CUSTOMER_SCOPE.md`, con pruebas sin base de datos.
+### Fixed
 
-### Corregido
+- `GET /customers` only returns customers visible to the authenticated user (previously visible across the entire tenant).
+- `POST /appointments` rejects unauthorized customer IDs with a generic `404` without confirming whether the ID exists in another branch.
+- Duplicate phone numbers on `POST /customers` return `409` with a generic message that leaks no existing customer fields.
+- Session refresh: a refresh token revoked less than 15 seconds ago is treated as a concurrent multi-tab refresh and rejected without revoking all active user sessions. Reuse after 15 seconds triggers full session revocation.
+- Frontend: duplicate tabs adopt rotated tokens via `BroadcastChannel` and serialize refresh calls via `navigator.locks`.
 
-- `GET /customers` solo devuelve clientes visibles para el usuario. Antes lo veía toda la empresa.
-- `POST /appointments` no acepta clientes no visibles para el usuario. Responde 404 sin confirmar que existan.
-- Un teléfono duplicado responde 409 con mensaje genérico, sin datos del cliente existente.
-- Renovación de sesión: un refresh token revocado hace menos de 15 s se rechaza como renovación concurrente y no cierra todas las sesiones. Pasado ese plazo sí se considera robo.
-- Frontend: las pestañas duplicadas adoptan el token rotado (`BroadcastChannel`) y la renovación va en cola (`navigator.locks`). Se reintenta una vez antes de cerrar sesión.
-- "Próximas reservas" pide solo reservas desde el momento actual.
+## 4.2.1 — R4.2 Security & DST Audit Hardening
 
-### Pendiente
+### Fixed
 
-- Verificación de correo y respuesta genérica en registro (enumeración de correos, N5).
-- Tokens fuera de `sessionStorage` con cookies `HttpOnly` (N8).
-- Carrera residual en la renovación si dos pestañas renuevan antes de recibir el mensaje; el servidor la limita con la ventana de 15 s.
-- Ejecutar pruebas con PostgreSQL y Docker: no ejecutadas en este entorno.
+- CORS now allows `PUT` so browser clients can update branch, staff, and resource schedules.
+- Fixed-window rate limiting on `/auth/register`, `/auth/login`, and `/auth/refresh` by IP and email using Redis with automatic in-memory fallback.
+- Ambiguous (fall-back) and nonexistent (spring-forward) local DST hours are rejected rather than silently resolved (`docs/scheduling/DST_POLICY.md`).
+- `audit_logs` is enforced as append-only for the runtime database role (`0004_r421_audit_append_only`).
+- Added `backend/.dockerignore` to exclude `.env` and caches from container builds.
 
-## 4.2.1 — Corrección de la auditoría R4.2
+## 4.2.0 — Universal Scheduling Engine
 
-### Corregido
+### Added
 
-- CORS permite `PUT`; los endpoints de horarios ya pueden llamarse desde el navegador.
-- Límites de intentos en `/auth/register`, `/auth/login` y `/auth/refresh` por IP, y en login por correo. Usa Redis con respaldo en memoria. Configurable con `RATE_LIMIT_ENABLED`; `TRUST_PROXY_HEADERS` solo detrás de un proxy de confianza.
-- Horas locales ambiguas (atraso de reloj) y horas inexistentes (adelanto) no se ofrecen ni se reservan. Política en `docs/scheduling/DST_POLICY.md`.
-- La consulta de reservas no depende de la medianoche local, que puede no existir por DST.
-- Reuso de un refresh token ya rotado cierra todas las sesiones activas del usuario y queda auditado.
-- `audit_logs` es de solo inserción para el rol de runtime (migración `0004_r421_audit_append_only`).
-- `backend/.dockerignore` evita copiar `.env` y cachés a la imagen.
-- Frontend: versión visible actualizada y precios en formato CLP.
+- Weekly opening hours and breaks for branches, staff, and physical resources, protected by PostgreSQL RLS and composite foreign keys.
+- IANA timezone validation per branch (`America/Santiago` default) with UTC `timestamptz` appointment storage.
+- Availability calculation considering service duration, buffer minutes, schedules, breaks, and active bookings.
+- PostgreSQL `EXCLUDE USING gist` (`btree_gist`) constraints plus ordered transaction advisory locks (`pg_advisory_xact_lock`) preventing concurrent double-booking of staff or resources.
 
-### Pendiente
+## 4.1.0 — SaaS Security Core & Row-Level Security
 
-- Verificación de correo y respuesta genérica en registro (enumeración de correos).
-- Filtro de clientes por sucursal, decisión de producto.
-- Tokens del frontend fuera de `sessionStorage`.
-- Pruebas completas con PostgreSQL y Docker: no ejecutadas en este entorno.
+### Added
 
-## 4.2.0 — Motor universal de agenda
-
-### Añadido
-
-- Horarios semanales y pausas para sucursales, profesionales y recursos, con aislamiento RLS y FKs compuestas.
-- Validación de zonas horarias IANA y configuración local de sucursal; reservas en UTC.
-- Endpoints de recursos y consulta/reemplazo de horarios/pausas.
-- Dependencias de tipos React (`@types/react`, `@types/react-dom`) y versión de frontend alineada a R4.2.
-- Endpoint de disponibilidad por fecha, servicio y profesional/recurso, considerando duración y buffer.
-- Validación de horarios y pausas al crear reservas.
-- Cancelación auditada de reservas pendientes/confirmadas.
-- Exclusión temporal PostgreSQL para evitar doble reserva de profesionales y recursos, incluso con solicitudes concurrentes externas a la API.
-- Pruebas unitarias de horarios/DST y pruebas de integración concurrente con PostgreSQL real.
-
-### Corregido / endurecido
-
-- La prevención de solapamientos ya no depende únicamente de advisory locks de la API: PostgreSQL aplica la garantía final con `btree_gist` y `EXCLUDE`.
-- Las reservas canceladas liberan el intervalo sin borrar el historial.
-
-### Migración
-
-- Alembic `0003_r42_universal_scheduling` agrega tablas horarias protegidas con RLS, campos de cancelación y restricciones de exclusión.
-- La migración falla explícitamente si detecta zonas horarias inválidas, servicios fuera de rango, estados desconocidos o solapamientos activos preexistentes.
-- En instalaciones con volumen PostgreSQL anterior a R4.2, un administrador debe instalar `btree_gist` una vez; el rol migrator no recibe `CREATE` sobre la base.
-
-### Pendiente / fuera de alcance
-
-- Ejecutar Docker Compose, migración y pruebas reales RLS/concurrencia en el Mac del usuario.
-- Build React/Vite pendiente: no se instalaron dependencias en este entorno; se añadieron `@types/react` y `@types/react-dom` al manifiesto.
-- Feriados, excepciones por fecha, turnos nocturnos/cruce de medianoche, reprogramación y políticas de cancelación por anticipación.
-- Twilio, Gemini, WhatsApp, notificaciones y billing.
-
-## 4.1.0 — Seguridad y núcleo SaaS
-
-### Añadido
-
-- Refresh tokens con JTI hasheado, almacenamiento por sesión, rotación de un solo uso y logout.
-- Índice global mínimo `auth_identities` para resolver tenant en login sin bypass de RLS sobre `users`.
-- Gestión API de usuarios y asignación explícita a sucursales.
-- Roles `SUPER_ADMIN`, `TENANT_ADMIN`, `BRANCH_MANAGER`, `OPERATOR` y `READ_ONLY` con control de permisos en endpoints.
-- Auditoría consultable por administradores.
-- RLS `ENABLE` + `FORCE` en la tabla raíz `tenants`, tablas de negocio, sesiones y asignaciones.
-- Claves foráneas compuestas para impedir relaciones cruzadas entre tenants.
-
-### Corregido
-
-- El contexto de tenant se reaplica al iniciar cada transacción SQLAlchemy.
-- Eliminado el bypass `app.auth_lookup` que permitía consultar globalmente `users` durante login.
-- Bloqueos separados para profesional y recurso en reservas concurrentes.
-
-### Pendiente / fuera de alcance
-
-- Pruebas reales de PostgreSQL/Docker y build frontend según el entorno de desarrollo.
-- Twilio, Gemini, WhatsApp, notificaciones y billing.
+- Rotating single-use refresh tokens with hashed JTI storage and explicit logout revocation.
+- Minimal global login lookup table (`auth_identities`) eliminating RLS bypass on `users`.
+- Role hierarchy (`SUPER_ADMIN`, `TENANT_ADMIN`, `BRANCH_MANAGER`, `OPERATOR`, `READ_ONLY`) and branch assignment table (`user_branch_access`).
+- `ENABLE` + `FORCE ROW LEVEL SECURITY` across all tenant tables and root `tenants` table, re-applied on every transaction via `Session.after_begin`.

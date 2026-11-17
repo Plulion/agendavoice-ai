@@ -2,7 +2,7 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const ACCESS_KEY = 'agv_access_token'
 const REFRESH_KEY = 'agv_refresh_token'
 const SESSION_CHANNEL = 'agv-session'
-// Tras rotar, la pestaña espera un momento antes de decidir que un 401 es robo (ver renewSession).
+// Wait window after rotation before treating a 401 as token replay/theft (see renewSession).
 const ADOPT_WAIT_MS = 300
 let refreshInFlight: Promise<boolean> | null = null
 
@@ -11,8 +11,8 @@ type TokenPair = { access_token: string; refresh_token: string }
 const channel: BroadcastChannel | null =
   typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(SESSION_CHANNEL) : null
 
-// Otra pestaña del mismo origen rotó el refresh token que esta también tiene (p. ej. una pestaña
-// duplicada). Solo se adopta si el token coincide con el antiguo, para no mezclar sesiones.
+// Another tab from the same origin rotated the refresh token shared by this tab.
+// Only adopt the new pair if the previous token matches to avoid mixing distinct sessions.
 channel?.addEventListener('message', (event: MessageEvent) => {
   const msg = event.data
   if (msg?.type === 'rotated' && sessionStorage.getItem(REFRESH_KEY) === msg.old) {
@@ -32,7 +32,7 @@ export function saveTokens(data: TokenPair){
 export function clearTokens(){
   sessionStorage.removeItem(ACCESS_KEY)
   sessionStorage.removeItem(REFRESH_KEY)
-  localStorage.removeItem('agv_token') // Limpieza del token usado por R4.0
+  localStorage.removeItem('agv_token') // Clean up legacy R4.0 token key
 }
 
 function expireSession(){
@@ -44,7 +44,7 @@ function expireSession(){
 async function renewSession():Promise<boolean>{
   if(refreshInFlight) return refreshInFlight
   refreshInFlight=(async()=>{
-    // Dentro del lock se lee el token de nuevo: si otra pestaña ya rotó, se usa el nuevo.
+    // Re-read the token inside the lock: if another tab already rotated it, use the updated token.
     const renew = async (attempt = 0): Promise<boolean> => {
       const refresh_token = sessionStorage.getItem(REFRESH_KEY)
       if(!refresh_token) return expireSession()
@@ -55,7 +55,7 @@ async function renewSession():Promise<boolean>{
       })
       if(!response.ok){
         if(attempt === 0){
-          // Puede ser una renovación concurrente: esperar la adopción y reintentar una vez.
+          // Potential concurrent tab refresh: wait briefly for BroadcastChannel adoption and retry once.
           await new Promise(resolve => setTimeout(resolve, ADOPT_WAIT_MS))
           if(sessionStorage.getItem(REFRESH_KEY) !== refresh_token) return renew(1)
         }
@@ -85,7 +85,7 @@ export async function api(path:string, method='GET', body?:unknown, retry=true){
   if(response.status===401 && retry && path!=='/auth/login' && path!=='/auth/register' && path!=='/auth/refresh'){
     if(await renewSession()) return api(path,method,body,false)
   }
-  const payload=await response.json().catch(()=>({detail:'Respuesta no válida del servidor'}))
-  if(!response.ok) throw new Error(payload.detail || `Error HTTP ${response.status}`)
+  const payload=await response.json().catch(()=>({detail:'Invalid server response'}))
+  if(!response.ok) throw new Error(payload.detail || `HTTP Error ${response.status}`)
   return payload
 }
