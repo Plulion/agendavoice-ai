@@ -1,107 +1,135 @@
-# AgendaVoice AI (R4.3.0) — Multi-Tenant & Multi-Branch Omnichannel Scheduling Engine
+# AgendaVoice AI R5.0.3 — Local-first foundation
 
-An enterprise B2B SaaS scheduling and conversational booking platform built with **FastAPI**, **PostgreSQL 16 (`FORCE ROW LEVEL SECURITY` + `btree_gist`)**, **Redis 7**, **Google Gemini 2.5 Flash**, and **React + TypeScript**.
+**Universal multi-tenant appointment and customer-engagement platform. First vertical: salons / barber shops.**
 
-Engineered to enforce strict **tenant isolation** between companies and **branch-level operational privacy** within the same company, while enabling frictionless phone, voice AI, and WhatsApp bookings via an industry-standard **Blind Upsert** workflow.
+R5.0.3 builds on the R4.3.0 codebase and adds customer profiles (first/last name and Chilean RUT), recorded consent, preferred professionals, service history, email appointment confirmation, a basic waitlist and a local Ollama adapter. The existing tenant isolation, branch scoping, scheduling, resource availability and audit foundation are retained.
 
-> **Interactive Architecture Showcase & Live Simulator (GitHub Pages):** Open [`docs/index.html`](docs/index.html) locally or enable **GitHub Pages** (`Settings > Pages > Branch: main /docs`) for interactive SVG diagrams, security matrices, and a live multi-branch simulator.
-> **Full Technical Documentation Index:** See [`docs/README.md`](docs/README.md).
+> **Release status: local validation candidate. Docker/PostgreSQL release checks remain pending; not production-ready.** This ZIP is a corrected R5 local validation candidate, not a claim that every feature in the master roadmap is finished. See `docs/R5_MASTER_SPEC.md` and `docs/R5_RELEASE_AUDIT.md` for implemented vs pending scope.
 
----
+## 1. What is implemented in R5.0.3
 
-## System Architecture & Two-Ring Isolation
+- Customer registration accepts first name, last name, phone, email and optional validated Chilean RUT; the legacy `name` field remains compatible.
+- Customer profile updates and consent history (`DATA_PROCESSING`, `EMAIL_MARKETING`).
+- Customer preferences for a professional by branch and optionally by service.
+- Appointment creation changes to `PENDING` until a secure email confirmation link is used.
+- Confirmation tokens are random, time-limited and stored as SHA-256 hashes. Expired unconfirmed bookings are released when booking or availability is queried.
+- Local SMTP sink via Mailpit; inspect messages at http://localhost:8025. No paid email provider is required for local testing.
+- Completed appointments create an immutable service-history snapshot containing service and professional names, date/time and branch.
+- Basic waitlist create/list endpoints.
+- Local Ollama chat adapter behind a provider boundary. It cannot access the database or execute business tools.
+- New RLS-protected tables for all R5 customer/workflow records.
 
-```mermaid
-flowchart TB
-    subgraph Channels["Omnichannel Entry Points"]
-        V[Voice Call / Gemini 2.5 Flash]
-        W[WhatsApp / Twilio HMAC Webhook]
-        P[Branch Receptionist Web Panel]
-    end
+## 2. Not yet implemented (do not assume otherwise)
 
-    subgraph API["FastAPI Security & Scheduling Core (R4.3.0)"]
-        RL[Redis Fixed-Window Rate Limiter]
-        JWT[JWT Access + Rotating Refresh Sessions]
-        RBAC[Branch-Scoped RBAC & Blind Upsert Resolver]
-        DST[IANA Timezone & DST Engine - America/Santiago]
-    end
+- Full conversational onboarding that asks “new or returning customer” and automatically looks up customer history/preferences in the AI dialogue.
+- Automatic application of the preferred professional during every booking (preference is stored and queryable, but booking selection workflow still needs integration).
+- Automatic waitlist matching and outreach after a cancellation.
+- Full rebooking/rescheduling flow, automatic reminder scheduler, no-show policy automation and multi-service/multi-professional booking.
+- Product variants, stock, cart, checkout, gift cards, loyalty points and payment processing.
+- Complete salon admin dashboard and customer self-service portal.
+- Production telephony, WhatsApp/SMS, Gemini cloud integration and AWS deployment. These remain deliberately disabled/deferred.
 
-    subgraph DB["PostgreSQL 16 Defense-in-Depth"]
-        RLS[ENABLE + FORCE ROW LEVEL SECURITY per Tenant]
-        CFK[Composite Tenant-Branch Foreign Keys]
-        GIST[Advisory Locks + EXCLUDE USING gist No-Overlap]
-        AUD[Append-Only Audit Logs]
-    end
+## 3. Requirements
 
-    Channels --> RL --> JWT --> RBAC --> DST --> RLS --> CFK --> GIST --> AUD
-```
+- macOS with Docker Desktop and Docker Compose v2.
+- Python 3.11+ if running backend tools outside Docker.
+- Node 20+ only if running the frontend outside Docker.
+- Ollama is optional. Core API and booking tests do not require a language model.
 
-### Core Engineering Highlights
-
-1. **Ring 1 — Database-Enforced Tenant Isolation (`FORCE RLS` + Composite FKs):**
-   * Every tenant-scoped table (`tenants`, `users`, `branches`, `customers`, `services`, `staff`, `resources`, `appointments`, `refresh_sessions`, `user_branch_access`, `audit_logs`, and all 6 schedule/break tables) enforces `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY` bound to `current_setting('app.tenant_id', true)`.
-   * SQLAlchemy's `Session.after_begin` listener reapplies `app.tenant_id` on every transaction boundary, preventing connection pool leakage after `COMMIT`.
-2. **Ring 2 — Intra-Tenant Branch Privacy & Industry-Standard "Blind Upsert":**
-   * Branch-scoped roles (`BRANCH_MANAGER`, `OPERATOR`, `READ_ONLY`) can only view schedules, staff, resources, and appointments belonging to their assigned `branch_id`s in `user_branch_access`.
-   * **Customer Scope (`home_branch_id` + Visit History):** `GET /customers` only returns customers registered at or previously booked in the user's allowed branches.
-   * **Cross-Branch Phone Booking ("Blind Upsert"):** When an existing customer from Branch A calls or messages Branch B, `POST /customers/resolve-phone` and `POST /appointments` link the customer by exact normalized phone number (`+569...`) **without exposing Branch A's history or metadata** and without requiring administrator intervention.
-3. **Physical Concurrency Guarantees (`btree_gist`):**
-   * Combines ordered transaction-level `pg_advisory_xact_lock` with PostgreSQL `EXCLUDE USING gist (tenant_id WITH =, staff_id WITH =, tstzrange(starts_at, ends_at, '[)') WITH &&)` constraints so two concurrent requests can never double-book a professional or physical resource.
-4. **Omnichannel Voice & WhatsApp AI Agent (`app/integrations/`):**
-   * Scopes **Gemini 2.5 Flash** (`agent.py`) strictly to the target `branch_id` and validates incoming WhatsApp/Voice webhooks via cryptographic `X-Twilio-Signature` HMAC-SHA1 verification (`webhooks.py`).
-
----
-
-## Role & Branch Permission Matrix
-
-| Role | Scope | Branches & Schedules | Staff & Resources | Customers (`GET /customers`) | Cross-Branch Phone Booking | Audit Logs |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`SUPER_ADMIN`** | Tenant-wide | Full CRUD | Full CRUD | All tenant customers | Unrestricted | Read (`GET /audit-logs`) |
-| **`TENANT_ADMIN`** | Tenant-wide | Full CRUD | Full CRUD | All tenant customers | Unrestricted | Read (`GET /audit-logs`) |
-| **`BRANCH_MANAGER`** | Assigned `branch_ids` | Read + Update own branch schedule | CRUD in own branch | Only own branch (origin or visited) | Yes (via exact phone Blind Upsert) | Denied (`403`) |
-| **`OPERATOR`** | Assigned `branch_ids` | Read own branch schedule | Read own branch | Only own branch (origin or visited) | Yes (via exact phone Blind Upsert) | Denied (`403`) |
-| **`READ_ONLY`** | Assigned `branch_ids` | Read own branch schedule | Read own branch | Only own branch (origin or visited) | Denied (`403` on write) | Denied (`403`) |
-
----
-
-## Step-by-Step Tutorial (Local Setup & Verification)
-
-### 1. Start the Full Stack with Docker Compose
+## 4. Run locally on a Mac
 
 ```bash
+cd agendavoice-ai-R5.0.3
 cp .env.example .env
-# Edit .env to set a strong JWT_SECRET (minimum 32 characters) and optional GEMINI_API_KEY
-docker compose up -d --build
 ```
 
-* **Backend REST API:** `http://localhost:8000`
-* **Interactive Swagger UI:** `http://localhost:8000/docs`
-* **React Admin Console:** `http://localhost:5173`
-
-### 2. Run the Automated Test Suites
+Change `POSTGRES_PASSWORD`, `APP_DB_PASSWORD` and `MIGRATOR_DB_PASSWORD` in `.env` before starting. Use alphanumeric values to avoid URL-encoding issues in the database connection strings. Defaults are development-only and must never be used on an exposed host.
 
 ```bash
-# Run pure unit test suites (24 tests: customer scope, DST policy, omnichannel & blind upsert)
-cd backend
-PYTHONPATH=. python3 tests/test_customer_scope_r422.py
-PYTHONPATH=. python3 tests/test_dst_policy_r421.py
-PYTHONPATH=. python3 tests/test_omnichannel_r430.py
-
-# Run full pytest suite + live PostgreSQL RLS & concurrency verification
-cd ..
-./scripts/test-postgres-rls-compose.sh
+docker compose up --build -d
+docker compose ps
 ```
 
-### 3. Walkthrough: Multi-Branch Isolation & Blind Upsert via API
+Services:
 
-1. **Register a Company (`POST /auth/register`):** Creates the tenant, `TENANT_ADMIN` user, and returns `access_token` + `refresh_token`.
-2. **Create Two Branches (`POST /branches`):** Create *"Sucursal Las Condes"* (`id=1`) and *"Sucursal Providencia"* (`id=2`).
-3. **Configure 7-Day Branch Schedule (`PUT /branches/1/schedule` & `PUT /branches/2/schedule`):** Define local opening/closing hours (`09:00:00` to `18:00:00`) and lunch breaks in `America/Santiago`.
-4. **Assign Branch Operator (`POST /users`):** Create an `OPERATOR` assigned exclusively to `branch_ids: [2]` (Providencia).
-5. **Book by Phone across Branches (`POST /appointments`):** Using the Providencia operator token, submit `customer_phone: "+56912345678"` and `customer_name: "Carlos Méndez"`. Even if Carlos was originally registered in Las Condes (`branch_id=1`), the Blind Upsert links his record cleanly for the Providencia appointment without leaking his Las Condes history.
+- API: http://localhost:8000
+- OpenAPI: http://localhost:8000/docs
+- Frontend: http://localhost:5173
+- Mailpit inbox: http://localhost:8025
+- PostgreSQL: localhost:5432
+- Redis: localhost:6379
 
----
+The API container runs Alembic migrations automatically before Uvicorn. Check:
 
-## License
+```bash
+curl http://localhost:8000/health
+```
 
-Released under the [MIT License](LICENSE) — Copyright (c) 2026 **Pedro Stephen Lulion Pasten / Webfinanzas Corp.**
+Stop services:
+
+```bash
+docker compose down
+```
+
+Stop and delete the local database volume (DESTRUCTIVE; removes local test data):
+
+```bash
+docker compose down -v
+```
+
+## 5. Optional local AI with Ollama (no Gemini key)
+
+Install Ollama natively on the Mac, then:
+
+```bash
+ollama pull qwen2.5:3b
+ollama serve
+```
+
+The Docker API reaches the Mac host through `host.docker.internal:11434`. `.env.example` sets this as `OLLAMA_BASE_URL`. If the API is run directly on macOS rather than in Docker, set it to `http://localhost:11434`.
+
+After logging in and obtaining an access token, test `POST /ai/local/chat` with:
+
+```json
+{"message":"Saluda a una clienta y pregúntale qué servicio necesita."}
+```
+
+This endpoint is a local model smoke test only. The model does not receive customer records and cannot create bookings. Business actions must later be implemented as validated backend tools with tenant and permission checks.
+
+## 6. Test suite
+
+Inside the backend directory:
+
+```bash
+cd backend
+python -m pip install -r requirements.txt
+PYTHONPATH=. pytest -q
+```
+
+The three PostgreSQL integration tests require a migrated disposable PostgreSQL database and `TEST_DATABASE_URL`; they are skipped otherwise. Unit tests do not prove PostgreSQL RLS/concurrency behavior.
+
+## 7. GitHub
+
+After local validation and before publishing, review `.env`, remove secrets and local data, then:
+
+```bash
+git init
+git add .
+git commit -m "AgendaVoice AI R5.0.3 local-first foundation"
+git branch -M main
+git remote add origin https://github.com/USUARIO/REPOSITORIO.git
+git push -u origin main
+```
+
+Replace the repository URL with your own. Do not commit `.env`, customer data, database dumps, or real credentials.
+
+## 8. Documents
+
+- `docs/R5_MASTER_SPEC.md`: consolidated functional scope and product decisions.
+- `docs/R5_0_3_SECURITY_HARDENING.md`: R5.0.3 security hardening and audit remediation report.
+- `docs/R5_RELEASE_AUDIT.md`: implementation audit and known limitations.
+- `docs/LOCAL_SETUP_MAC.md`: Mac setup and local troubleshooting.
+- `docs/LOCAL_TEST_PLAN.md`: manual and automated test plan.
+- `docs/architecture/R5_COMPONENTS.mmd`: component architecture.
+- `docs/uml/R5_ERD.mmd`: core data model.
+- `docs/api/ENDPOINTS_R5.md`: new R5 endpoints.

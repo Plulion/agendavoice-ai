@@ -7,6 +7,9 @@ class Customer(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
+    first_name: Mapped[str | None] = mapped_column(String(100))
+    last_name: Mapped[str | None] = mapped_column(String(100))
+    rut: Mapped[str | None] = mapped_column(String(12))
     phone: Mapped[str] = mapped_column(String(40), nullable=False)
     email: Mapped[str | None] = mapped_column(String(255))
     # Origin branch where the customer was registered. Allows that branch to view the customer before their first booking.

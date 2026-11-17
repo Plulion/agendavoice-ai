@@ -1,8 +1,13 @@
 from datetime import date, datetime, time, timedelta, timezone
 from hashlib import sha256
+import json
+import logging
 from uuid import uuid4
+import secrets
+from html import escape
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text, or_, select, false
@@ -21,20 +26,34 @@ from app.modules.tenants.models import Tenant
 from app.modules.identity.models import User, AuthIdentity, RefreshSession, UserBranchAccess
 from app.modules.branches.models import Branch
 from app.modules.customers.models import Customer
+from app.modules.customers.rut import is_valid_chilean_rut, normalize_rut
+from app.modules.customers.relationship_models import CustomerConsent, CustomerStaffPreference, ServiceHistory
+from app.modules.notifications.models import AppointmentConfirmation, EmailOutbox
+from app.modules.notifications.email import send_email
+from app.modules.notifications.formatting import (
+    format_appointment_local_time,
+    is_valid_confirmation_token_format,
+    resolve_confirmation_recipient,
+)
 from app.modules.catalog.models import Service
 from app.modules.scheduling.models import (Staff, Resource, Appointment, BranchHours, BranchBreak, StaffHours, StaffBreak, ResourceHours, ResourceBreak)
+from app.modules.scheduling.relationship_models import WaitlistEntry
 from app.modules.subscriptions.models import Subscription
 from app.modules.audit.models import AuditLog
 from app.modules.scheduling.availability import WeeklyWindow, WeeklyBreak, interval_fits_schedule, local_slot_to_utc, iter_local_slots
 from app.schemas import (RegisterIn, LoginIn, RefreshIn, TokenOut, UserCreateIn,
     BranchIn, ServiceIn, StaffIn, CustomerIn, AppointmentIn, AppointmentOut,
-    ResourceIn, ScheduleConfigIn, AppointmentCancelIn, PhoneResolveIn, OmnichannelTurnIn)
+    ResourceIn, ScheduleConfigIn, AppointmentCancelIn, PhoneResolveIn, OmnichannelTurnIn,
+    CustomerProfileUpdateIn, CustomerConsentIn, StaffPreferenceIn, WaitlistIn, LocalChatIn, AppointmentConfirmationIn)
 from app.modules.customers.visibility import normalize_phone, sanitize_cross_branch_customer
-from app.integrations.gemini.agent import run_branch_conversation_turn
+from app.integrations.gemini.agent import extract_email_from_text, run_branch_conversation_turn
+from app.integrations.llm.ollama import OllamaChatProvider
 
-app = FastAPI(title="AgendaVoice AI API", version="4.3.0", description="Universal multi-tenant & multi-branch scheduling engine")
+app = FastAPI(title="AgendaVoice AI API", version="5.0.3", description="Universal multi-tenant customer, scheduling and engagement platform")
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"], allow_headers=["Authorization", "Content-Type"])
+
+logger = logging.getLogger(__name__)
 
 # Fixed-window rate limiter by IP/email on authentication endpoints. Backed by Redis across workers.
 _limiter = FixedWindowLimiter(redis_client=Redis.from_url(settings.redis_url, socket_connect_timeout=0.5, socket_timeout=0.5))
@@ -51,6 +70,19 @@ def issue_token_pair(db: Session, user: User) -> dict:
 def audit(db, user, action, entity_type, entity_id, details=None):
     db.add(AuditLog(tenant_id=user.tenant_id, actor_user_id=user.id, action=action,
         entity_type=entity_type, entity_id=str(entity_id) if entity_id else None, details=details or {}))
+
+
+def expire_pending_appointments(db, tenant_id: int) -> int:
+    """Release appointments whose email confirmation token expired."""
+    result = db.execute(text("""
+        UPDATE appointments AS a SET status='CANCELLED', cancelled_at=now(),
+            cancellation_reason='El plazo para confirmar la cita expiró'
+        WHERE a.tenant_id=:tenant_id AND a.status='PENDING'
+          AND EXISTS (SELECT 1 FROM appointment_confirmations c
+            WHERE c.tenant_id=a.tenant_id AND c.appointment_id=a.id AND c.expires_at < now()
+              AND c.confirmed_at IS NULL)
+    """), {"tenant_id": tenant_id})
+    return result.rowcount or 0
 
 
 ACTIVE_APPOINTMENT_STATUSES = ("PENDING", "CONFIRMED")
@@ -104,10 +136,10 @@ def _resolve_or_create_customer_by_phone(
     phone: str,
     name: str | None = None,
     email: str | None = None,
-) -> tuple[Customer, bool]:
+) -> tuple[Customer, bool, bool]:
     """Industry-standard Blind Upsert: resolve customer by exact normalized phone within the tenant
     or create a new customer assigned to the current branch as home_branch_id.
-    Returns (customer, was_existing_other_branch).
+    Returns (customer, was_existing_other_branch, created_new_customer).
     """
     assert_branch_access(db, user, branch_id)
     clean_phone = normalize_phone(phone) or phone.strip()
@@ -126,7 +158,7 @@ def _resolve_or_create_customer_by_phone(
                 existing.id,
                 {"branch_id": branch_id},
             )
-        return existing, was_other
+        return existing, was_other, False
 
     if not name or len(name.strip()) < 2:
         raise HTTPException(422, "El cliente no está registrado; indique su nombre para crearlo")
@@ -141,7 +173,7 @@ def _resolve_or_create_customer_by_phone(
     db.add(obj)
     db.flush()
     audit(db, user, "customer.created", "customer", obj.id, {"home_branch_id": branch_id})
-    return obj, False
+    return obj, False, True
 
 
 def _weekly_windows(rows):
@@ -570,6 +602,13 @@ def create_customer(data: CustomerIn, user: User = Depends(require_roles(
         "TENANT_ADMIN", "SUPER_ADMIN", "BRANCH_MANAGER", "OPERATOR")), db: Session = Depends(get_db)):
     payload = data.model_dump()
     requested_branch = payload.pop("branch_id")
+    payload["phone"] = normalize_phone(payload["phone"])
+    if payload.get("first_name") and payload.get("last_name"):
+        payload["name"] = f"{payload['first_name'].strip()} {payload['last_name'].strip()}".strip()
+    if payload.get("rut"):
+        payload["rut"] = normalize_rut(payload["rut"])
+        if not is_valid_chilean_rut(payload["rut"]):
+            raise HTTPException(422, "El RUT no es válido")
     allowed = accessible_branch_ids(db, user)
     if allowed is None:
         home_branch_id = requested_branch
@@ -593,7 +632,7 @@ def create_customer(data: CustomerIn, user: User = Depends(require_roles(
     except IntegrityError:
         db.rollback()
         # Generic 409 message: does not leak customer fields belonging to other branches.
-        raise HTTPException(409, "El teléfono ya está registrado en la empresa; un administrador debe revisarlo")
+        raise HTTPException(409, "El teléfono o RUT ya está registrado en la empresa; un administrador debe revisarlo")
     return obj
 
 
@@ -618,13 +657,13 @@ def resolve_customer_by_phone(
     branch = db.query(Branch).filter_by(id=data.branch_id, tenant_id=user.tenant_id, active=True).first()
     if not branch:
         raise HTTPException(404, "Sucursal no encontrada")
-    customer, was_other = _resolve_or_create_customer_by_phone(
+    customer, was_other, _ = _resolve_or_create_customer_by_phone(
         db, user, data.branch_id, data.phone, data.name, str(data.email) if data.email else None
     )
     db.commit()
     db.refresh(customer)
     if was_other:
-        return sanitize_cross_branch_customer(customer.id, customer.name, customer.phone)
+        return sanitize_cross_branch_customer(phone=customer.phone)
     return {
         "id": customer.id,
         "name": customer.name,
@@ -643,19 +682,65 @@ def list_audit_logs(user: User = Depends(require_roles("TENANT_ADMIN", "SUPER_AD
         AuditLog.created_at.desc(), AuditLog.id.desc()).limit(limit).all()
 
 
+def _build_confirmation_email(
+    *,
+    customer_name: str | None,
+    service_name: str,
+    staff_name: str,
+    starts_utc: datetime,
+    branch_timezone: str,
+    confirmation_url: str,
+    include_customer_name: bool,
+) -> tuple[str, str]:
+    """Render plain-text and HTML confirmation emails in the branch's local timezone (M3 & A2)."""
+    local_when = format_appointment_local_time(starts_utc, branch_timezone)
+    greeting_text = f"Hola {customer_name}," if (include_customer_name and customer_name) else "Hola,"
+    greeting_html = (
+        f"<h2>¡Hola {escape(customer_name)}!</h2>"
+        if (include_customer_name and customer_name)
+        else "<h2>¡Hola!</h2>"
+    )
+    body = (
+        f"{greeting_text}\n\nHemos recibido tu solicitud de cita.\n"
+        f"Servicio: {service_name}\nProfesional: {staff_name}\n"
+        f"Fecha y hora: {local_when}\n\n"
+        f"Confirma tu cita aquí: {confirmation_url}\n"
+        f"El enlace vence en {settings.appointment_confirmation_minutes} minutos.\n"
+    )
+    html_body = (
+        "<!doctype html><html><body style='font-family:Arial,sans-serif;color:#222'>"
+        f"{greeting_html}<p>Hemos recibido tu solicitud de cita.</p>"
+        f"<p><b>Servicio:</b> {escape(service_name)}<br>"
+        f"<b>Profesional:</b> {escape(staff_name)}<br>"
+        f"<b>Fecha y hora:</b> {escape(local_when)}</p>"
+        f"<p><a href='{escape(confirmation_url, quote=True)}' style='display:inline-block;padding:14px 24px;"
+        "background:#14532d;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold'>CONFIRMAR MI CITA</a></p>"
+        f"<p>Este enlace vence en {settings.appointment_confirmation_minutes} minutos.</p>"
+        "<p>Si no solicitaste esta cita, puedes ignorar este mensaje.</p></body></html>"
+    )
+    return body, html_body
+
+
 @app.post("/appointments", response_model=AppointmentOut, status_code=201)
-def create_appointment(data: AppointmentIn, user: User = Depends(require_roles(
-        "TENANT_ADMIN", "SUPER_ADMIN", "BRANCH_MANAGER", "OPERATOR")), db: Session = Depends(get_db)):
+def create_appointment(
+    data: AppointmentIn,
+    request: Request,
+    user: User = Depends(require_roles("TENANT_ADMIN", "SUPER_ADMIN", "BRANCH_MANAGER", "OPERATOR")),
+    db: Session = Depends(get_db),
+):
+    enforce_rate_limit(f"appointment-create:{user.tenant_id}:{user.id}:{client_ip(request)}", 30, 3600)
     assert_branch_access(db, user, data.branch_id)
     branch = db.query(Branch).filter(Branch.id == data.branch_id,
         Branch.tenant_id == user.tenant_id, Branch.active.is_(True)).first()
     if not branch:
         raise HTTPException(404, "Sucursal, cliente o servicio no encontrado")
     customer = None
+    was_other_branch = False
+    created_new_customer = False
     if data.customer_phone:
-        # Blind Upsert by exact phone: allows Branch B to book a customer originally registered at Branch A
-        # without exposing prior Branch A history or requiring administrator intervention.
-        customer, _ = _resolve_or_create_customer_by_phone(
+        # Blind Upsert by exact phone: links an existing customer without exposing other branches'
+        # history or allowing confirmation emails to be hijacked to an arbitrary address.
+        customer, was_other_branch, created_new_customer = _resolve_or_create_customer_by_phone(
             db, user, branch.id, data.customer_phone, data.customer_name,
             str(data.customer_email) if data.customer_email else None,
         )
@@ -688,6 +773,25 @@ def create_appointment(data: AppointmentIn, user: User = Depends(require_roles(
     if not fits:
         raise HTTPException(409, reason)
 
+    # A2 fix: for existing customers, always send strictly to the stored email address
+    # rather than any caller-supplied email.
+    recipient = resolve_confirmation_recipient(
+        created_new_customer=created_new_customer,
+        stored_email=customer.email,
+        requested_email=str(data.customer_email) if data.customer_email else None,
+    )
+    if not recipient:
+        if created_new_customer:
+            raise HTTPException(422, "Se requiere un correo electrónico para enviar el enlace de confirmación")
+        raise HTTPException(
+            422,
+            "El cliente existente no tiene un correo electrónico registrado para confirmación; "
+            "un administrador debe actualizar su perfil.",
+        )
+    # A4 fix: cap confirmation emails sent to any single recipient address per hour.
+    enforce_rate_limit(f"appointment-email:{user.tenant_id}:{recipient.lower()}", 5, 3600)
+
+    expire_pending_appointments(db, user.tenant_id)
     # Ordered transaction advisory locks serialize API requests;
     # PostgreSQL EXCLUDE USING gist constraints provide the physical cross-process guarantee.
     lock_keys = []
@@ -711,19 +815,118 @@ def create_appointment(data: AppointmentIn, user: User = Depends(require_roles(
     appointment_values["customer_id"] = customer.id
     appointment_values["starts_at"] = starts
     obj = Appointment(tenant_id=user.tenant_id, **appointment_values,
-        ends_at=ends, status="CONFIRMED")
+        ends_at=ends, status="PENDING")
     db.add(obj)
     try:
         db.flush()
-        audit(db, user, "appointment.created", "appointment", obj.id,
-              {"starts_at": starts.isoformat(), "ends_at": ends.isoformat()})
+        raw_token = secrets.token_urlsafe(32)
+        confirmation = AppointmentConfirmation(tenant_id=user.tenant_id, appointment_id=obj.id,
+            token_hash=sha256(raw_token.encode()).hexdigest(),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.appointment_confirmation_minutes))
+        confirmation_url = f"{settings.public_api_url.rstrip('/')}/public/appointments/confirm?token={raw_token}"
+        staff_name = db.query(Staff.name).filter(Staff.id == data.staff_id, Staff.tenant_id == user.tenant_id).scalar() if data.staff_id else "Profesional por asignar"
+        body, html_body = _build_confirmation_email(
+            customer_name=customer.name,
+            service_name=service.name,
+            staff_name=staff_name or "Profesional",
+            starts_utc=starts,
+            branch_timezone=branch.timezone,
+            confirmation_url=confirmation_url,
+            include_customer_name=not was_other_branch,
+        )
+        outbox = EmailOutbox(tenant_id=user.tenant_id, appointment_id=obj.id, recipient=recipient,
+            subject="Confirma tu cita - AgendaVoice AI",
+            body_text="Plantilla de confirmación. El enlace de un solo uso no se conserva en la bandeja de salida.", status="PENDING")
+        db.add(confirmation); db.add(outbox)
+        audit(db, user, "appointment.created_pending_confirmation", "appointment", obj.id,
+              {"starts_at": starts.isoformat(), "ends_at": ends.isoformat(), "cross_branch": was_other_branch})
         db.commit()
-        db.refresh(obj)
+        db.refresh(obj); db.refresh(outbox)
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, "El profesional o recurso acaba de ser reservado por otra solicitud")
+    # Deliver immediately to local Mailpit or configured SMTP. Failed deliveries remain in outbox.
+    try:
+        send_email(outbox.recipient, outbox.subject, body, html_body)
+        outbox.status = "SENT"; outbox.sent_at = datetime.now(timezone.utc); outbox.attempts += 1
+    except Exception as exc:
+        outbox.status = "FAILED"; outbox.attempts += 1; outbox.last_error = str(exc)[:500]
+    db.commit()
     return obj
 
+
+@app.post("/appointments/{appointment_id}/resend-confirmation")
+def resend_appointment_confirmation(
+    appointment_id: int,
+    request: Request,
+    user: User = Depends(require_roles("TENANT_ADMIN", "SUPER_ADMIN", "BRANCH_MANAGER", "OPERATOR")),
+    db: Session = Depends(get_db),
+):
+    """M4 fix: rotate the confirmation token and resend confirmation email for a PENDING appointment."""
+    enforce_rate_limit(f"appointment-resend:{user.tenant_id}:{user.id}:{client_ip(request)}", 15, 3600)
+    appointment = db.query(Appointment).filter_by(id=appointment_id, tenant_id=user.tenant_id).with_for_update().first()
+    if not appointment:
+        raise HTTPException(404, "Reserva no encontrada")
+    assert_branch_access(db, user, appointment.branch_id)
+    if appointment.status != "PENDING":
+        raise HTTPException(409, "Solo se puede reenviar confirmación para reservas pendientes")
+    customer = db.query(Customer).filter_by(id=appointment.customer_id, tenant_id=user.tenant_id).first()
+    branch = db.query(Branch).filter_by(id=appointment.branch_id, tenant_id=user.tenant_id).first()
+    service = db.query(Service).filter_by(id=appointment.service_id, tenant_id=user.tenant_id).first()
+    if not customer or not customer.email or not branch or not service:
+        raise HTTPException(422, "No es posible reenviar la confirmación para esta reserva")
+    enforce_rate_limit(f"appointment-email:{user.tenant_id}:{customer.email.lower()}", 5, 3600)
+
+    now = datetime.now(timezone.utc)
+    # Expire previous unconfirmed tokens for this appointment
+    db.query(AppointmentConfirmation).filter(
+        AppointmentConfirmation.tenant_id == user.tenant_id,
+        AppointmentConfirmation.appointment_id == appointment.id,
+        AppointmentConfirmation.confirmed_at.is_(None),
+        AppointmentConfirmation.expires_at > now,
+    ).update({"expires_at": now}, synchronize_session=False)
+
+    raw_token = secrets.token_urlsafe(32)
+    confirmation = AppointmentConfirmation(
+        tenant_id=user.tenant_id,
+        appointment_id=appointment.id,
+        token_hash=sha256(raw_token.encode()).hexdigest(),
+        expires_at=now + timedelta(minutes=settings.appointment_confirmation_minutes),
+    )
+    confirmation_url = f"{settings.public_api_url.rstrip('/')}/public/appointments/confirm?token={raw_token}"
+    staff_name = (
+        db.query(Staff.name).filter(Staff.id == appointment.staff_id, Staff.tenant_id == user.tenant_id).scalar()
+        if appointment.staff_id else "Profesional por asignar"
+    )
+    body, html_body = _build_confirmation_email(
+        customer_name=customer.name,
+        service_name=service.name,
+        staff_name=staff_name or "Profesional",
+        starts_utc=appointment.starts_at,
+        branch_timezone=branch.timezone,
+        confirmation_url=confirmation_url,
+        include_customer_name=_customer_visible(db, user, customer),
+    )
+    outbox = EmailOutbox(
+        tenant_id=user.tenant_id,
+        appointment_id=appointment.id,
+        recipient=customer.email,
+        subject="Confirma tu cita - AgendaVoice AI",
+        body_text="Reenvío de confirmación. El enlace de un solo uso no se conserva en la bandeja de salida.",
+        status="PENDING",
+    )
+    db.add(confirmation)
+    db.add(outbox)
+    audit(db, user, "appointment.confirmation_resent", "appointment", appointment.id)
+    db.commit()
+    db.refresh(outbox)
+    try:
+        send_email(outbox.recipient, outbox.subject, body, html_body)
+        outbox.status = "SENT"; outbox.sent_at = datetime.now(timezone.utc); outbox.attempts += 1
+    except Exception as exc:
+        outbox.status = "FAILED"; outbox.attempts += 1; outbox.last_error = str(exc)[:500]
+    db.commit()
+    return {"appointment_id": appointment.id, "outbox_id": outbox.id, "delivery_status": outbox.status}
 
 @app.get("/appointments", response_model=list[AppointmentOut])
 def list_appointments(from_at: datetime | None = None, to_at: datetime | None = None,
@@ -767,6 +970,9 @@ def get_availability(day: date, branch_id: int, service_id: int, staff_id: int |
     if resource_id is not None and not db.query(Resource).filter_by(id=resource_id, tenant_id=user.tenant_id, branch_id=branch_id, active=True).first():
         raise HTTPException(404, "Recurso no disponible")
     branch_hours, branch_breaks, configured = _branch_schedule(db, user.tenant_id, branch_id)
+    expired_count = expire_pending_appointments(db, user.tenant_id)
+    if expired_count:
+        db.commit()  # persist released slots before returning availability
     if not configured:
         return {"day": day.isoformat(), "timezone": branch.timezone, "slots": [], "reason": "Horario de sucursal no configurado"}
     day_hours = next((h for h in branch_hours if h.weekday == day.weekday()), None)
@@ -839,6 +1045,7 @@ def cancel_appointment(appointment_id: int, data: AppointmentCancelIn,
 @app.post("/channels/omnichannel/turn")
 def omnichannel_turn(
     data: OmnichannelTurnIn,
+    request: Request,
     user: User = Depends(require_roles("TENANT_ADMIN", "SUPER_ADMIN", "BRANCH_MANAGER", "OPERATOR")),
     db: Session = Depends(get_db),
 ):
@@ -850,6 +1057,9 @@ def omnichannel_turn(
     branch = db.query(Branch).filter_by(id=data.branch_id, tenant_id=user.tenant_id, active=True).first()
     if not tenant or not branch:
         raise HTTPException(404, "Sucursal no encontrada")
+
+    # N2 fix: extract email from free-text follow-up turns if not passed structurally.
+    resolved_email = str(data.customer_email) if data.customer_email else extract_email_from_text(data.message)
 
     def _slots_fn():
         if not data.service_id or (data.staff_id is None and data.resource_id is None):
@@ -869,16 +1079,38 @@ def omnichannel_turn(
     def _book_fn():
         if not data.service_id or not data.starts_at or (data.staff_id is None and data.resource_id is None):
             raise HTTPException(422, "Para agendar se requiere service_id, starts_at y staff_id o resource_id")
+        # N4 fix: search both normalized and raw phone formats for compatibility with pre-R5.0.2 records.
+        normalized_phone = normalize_phone(data.sender_phone)
+        existing_customer = db.query(Customer).filter(
+            Customer.tenant_id == user.tenant_id,
+            or_(Customer.phone == normalized_phone, Customer.phone == data.sender_phone.strip()),
+        ).first()
+        if existing_customer is not None:
+            if not existing_customer.email:
+                return {"status": "ADMIN_EMAIL_REQUIRED"}
+            booking_email = None  # Existing customers always receive confirmation at their stored email (A2)
+            booking_name = None
+        else:
+            # N3 fix: avoid creating brand-new customers named generic "Cliente".
+            clean_name = (data.sender_name or "").strip()
+            if len(clean_name) < 2 or clean_name.lower() == "cliente":
+                return {"status": "NAME_REQUIRED"}
+            if not resolved_email:
+                return {"status": "EMAIL_REQUIRED"}
+            booking_email = resolved_email
+            booking_name = clean_name
         appt = create_appointment(
             data=AppointmentIn(
                 branch_id=branch.id,
                 customer_phone=data.sender_phone,
-                customer_name=data.sender_name,
+                customer_name=booking_name,
+                customer_email=booking_email,
                 service_id=data.service_id,
                 staff_id=data.staff_id,
                 resource_id=data.resource_id,
                 starts_at=data.starts_at,
             ),
+            request=request,
             user=user,
             db=db,
         )
@@ -895,7 +1127,215 @@ def omnichannel_turn(
         book_appointment_fn=_book_fn if (data.service_id and data.starts_at) else None,
     )
 
+@app.post("/ai/local/chat")
+def local_ai_chat(data: LocalChatIn, user: User = Depends(current_user)):
+    """Local LLM smoke test. The model cannot invoke tools or access tenant data."""
+    messages = []
+    if data.system_prompt:
+        messages.append({"role": "system", "content": data.system_prompt})
+    else:
+        messages.append({"role": "system", "content": "Eres un asistente de atención de una peluquería. Responde en español, con claridad. No inventes disponibilidad, precios ni datos de clientes."})
+    messages.append({"role": "user", "content": data.message})
+    try:
+        answer = OllamaChatProvider().chat(messages)
+    except RuntimeError as exc:
+        logger.warning("Local Ollama provider unavailable: %s", exc)
+        raise HTTPException(503, "El servicio de IA local no está disponible en este momento")
+    return {"provider": "ollama-local", "model": settings.ollama_model, "answer": answer}
+
+
+@app.post("/waitlist", status_code=201)
+def create_waitlist_entry(data: WaitlistIn, user: User = Depends(require_roles(
+        "TENANT_ADMIN", "SUPER_ADMIN", "BRANCH_MANAGER", "OPERATOR")), db: Session = Depends(get_db)):
+    assert_branch_access(db, user, data.branch_id)
+    customer = db.query(Customer).filter_by(id=data.customer_id, tenant_id=user.tenant_id).first()
+    service = db.query(Service).filter_by(id=data.service_id, tenant_id=user.tenant_id, active=True).first()
+    if not customer or not _customer_visible(db, user, customer) or not service:
+        raise HTTPException(404, "Cliente o servicio no encontrado")
+    if data.staff_id and not db.query(Staff).filter_by(id=data.staff_id, tenant_id=user.tenant_id,
+            branch_id=data.branch_id, active=True).first():
+        raise HTTPException(404, "Profesional no disponible en la sucursal")
+    item = WaitlistEntry(tenant_id=user.tenant_id, **data.model_dump())
+    db.add(item); audit(db, user, "waitlist.created", "waitlist", None,
+        {"customer_id": data.customer_id, "service_id": data.service_id})
+    db.commit(); db.refresh(item)
+    return {"id": item.id, "status": item.status, "preferred_from": item.preferred_from,
+            "preferred_to": item.preferred_to}
+
+
+@app.get("/waitlist")
+def list_waitlist(branch_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    assert_branch_access(db, user, branch_id)
+    return db.query(WaitlistEntry).filter_by(tenant_id=user.tenant_id, branch_id=branch_id,
+        status="WAITING").order_by(WaitlistEntry.created_at).limit(500).all()
+
+
+@app.get("/public/appointments/confirm", response_class=HTMLResponse)
+def preview_appointment_confirmation(token: str, request: Request, db: Session = Depends(get_db)):
+    """Safe landing page: GET never changes appointment state (mail scanners may prefetch links)."""
+    enforce_rate_limit(f"appointment-preview:{client_ip(request)}", 30, 300)
+    if not is_valid_confirmation_token_format(token):
+        raise HTTPException(400, "Enlace de confirmación inválido")
+    token_hash = sha256(token.encode()).hexdigest()
+    db.execute(text("SELECT set_config('app.confirmation_token_hash', :value, true)"), {"value": token_hash})
+    confirmation = db.query(AppointmentConfirmation).filter_by(token_hash=token_hash).first()
+    if not confirmation:
+        raise HTTPException(404, "Enlace de confirmación inválido o ya no disponible")
+    if confirmation.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(410, "El enlace de confirmación ha vencido")
+    token_json = json.dumps(token)
+    return HTMLResponse(
+        "<!doctype html><html lang='es'><meta charset='utf-8'><title>Confirmar cita</title>"
+        "<main><h1>Confirma tu cita</h1><p>Presiona el botón para confirmar tu reserva.</p>"
+        "<button id='confirm'>Confirmar mi cita</button><p id='result' role='status'></p></main>"
+        "<script>document.getElementById('confirm').addEventListener('click', async () => {"
+        "const b=document.getElementById('confirm'); b.disabled=true;"
+        f"const r=await fetch('/public/appointments/confirm',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{token:{token_json}}})}});"
+        "document.getElementById('result').textContent=r.ok?'¡Tu cita está confirmada!':(await r.text());"
+        "});</script></html>"
+    )
+
+
+@app.post("/public/appointments/confirm", response_class=HTMLResponse)
+def confirm_appointment_by_email(data: AppointmentConfirmationIn, request: Request, db: Session = Depends(get_db)):
+    """Explicit confirmation action. GET only renders a landing page."""
+    token_hash = sha256(data.token.encode()).hexdigest()
+    enforce_rate_limit(f"appointment-confirm:{client_ip(request)}:{token_hash[:16]}", 10, 300)
+    db.execute(text("SELECT set_config('app.confirmation_token_hash', :value, true)"), {"value": token_hash})
+    confirmation = db.query(AppointmentConfirmation).filter_by(token_hash=token_hash).first()
+    if not confirmation:
+        raise HTTPException(404, "Enlace de confirmación inválido o ya no disponible")
+    set_tenant_context(db, confirmation.tenant_id)
+    confirmation = db.query(AppointmentConfirmation).filter_by(id=confirmation.id,
+        tenant_id=confirmation.tenant_id).with_for_update().first()
+    if not confirmation:
+        raise HTTPException(404, "Enlace de confirmación inválido o ya no disponible")
+    if confirmation.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(410, "El enlace de confirmación ha vencido")
+    appointment = db.query(Appointment).filter_by(id=confirmation.appointment_id,
+        tenant_id=confirmation.tenant_id).with_for_update().first()
+    if not appointment:
+        raise HTTPException(404, "Reserva no encontrada")
+    if appointment.status == "CONFIRMED":
+        return HTMLResponse("<main><h1>Tu cita ya está confirmada</h1></main>")
+    if appointment.status != "PENDING":
+        raise HTTPException(409, "Esta reserva ya no puede confirmarse")
+    appointment.status = "CONFIRMED"
+    confirmation.confirmed_at = datetime.now(timezone.utc)
+    db.add(AuditLog(tenant_id=confirmation.tenant_id, actor_user_id=None,
+        action="appointment.confirmed_by_customer", entity_type="appointment",
+        entity_id=str(appointment.id), details={"channel": "email"}))
+    db.commit()
+    return HTMLResponse("<main><h1>¡Tu cita está confirmada!</h1></main>")
+
+
+@app.put("/customers/{customer_id}/profile")
+def update_customer_profile(customer_id: int, data: CustomerProfileUpdateIn,
+        user: User = Depends(require_roles("TENANT_ADMIN", "SUPER_ADMIN")), db: Session = Depends(get_db)):
+    # Customer identity/contact fields are tenant-global; branch operators must not
+    # overwrite data shared by every branch.
+    customer = db.query(Customer).filter_by(id=customer_id, tenant_id=user.tenant_id).first()
+    if not customer:
+        raise HTTPException(404, "Cliente no encontrado")
+    supplied = data.model_fields_set
+    if "first_name" in supplied and data.first_name is not None:
+        customer.first_name = data.first_name.strip()
+    if "last_name" in supplied and data.last_name is not None:
+        customer.last_name = data.last_name.strip()
+    if customer.first_name or customer.last_name:
+        customer.name = f"{customer.first_name or ''} {customer.last_name or ''}".strip()
+    if "rut" in supplied:
+        rut = normalize_rut(data.rut) if data.rut else None
+        if rut and not is_valid_chilean_rut(rut):
+            raise HTTPException(422, "El RUT no es válido")
+        customer.rut = rut
+    if "email" in supplied:
+        customer.email = str(data.email) if data.email else None
+    audit(db, user, "customer.profile.updated", "customer", customer.id)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "El RUT ya está registrado para otro cliente de esta empresa")
+    db.refresh(customer)
+    return {"id": customer.id, "name": customer.name, "first_name": customer.first_name,
+            "last_name": customer.last_name, "rut": customer.rut, "email": customer.email}
+
+
+@app.post("/customers/{customer_id}/consents", status_code=201)
+def record_customer_consent(customer_id: int, data: CustomerConsentIn,
+        user: User = Depends(require_roles("TENANT_ADMIN", "SUPER_ADMIN", "BRANCH_MANAGER", "OPERATOR")), db: Session = Depends(get_db)):
+    customer = db.query(Customer).filter_by(id=customer_id, tenant_id=user.tenant_id).first()
+    if not customer or not _customer_visible(db, user, customer):
+        raise HTTPException(404, "Cliente no encontrado")
+    item = CustomerConsent(tenant_id=user.tenant_id, customer_id=customer_id, **data.model_dump())
+    db.add(item); audit(db, user, "customer.consent.recorded", "customer", customer_id,
+                       {"consent_type": data.consent_type, "granted": data.granted})
+    db.commit(); db.refresh(item)
+    return {"id": item.id, "consent_type": item.consent_type, "granted": item.granted,
+            "policy_version": item.policy_version, "recorded_at": item.recorded_at}
+
+
+@app.post("/customers/{customer_id}/staff-preferences", status_code=201)
+def add_staff_preference(customer_id: int, data: StaffPreferenceIn,
+        user: User = Depends(require_roles("TENANT_ADMIN", "SUPER_ADMIN", "BRANCH_MANAGER", "OPERATOR")), db: Session = Depends(get_db)):
+    customer = db.query(Customer).filter_by(id=customer_id, tenant_id=user.tenant_id).first()
+    if not customer or not _customer_visible(db, user, customer): raise HTTPException(404, "Cliente no encontrado")
+    assert_branch_access(db, user, data.branch_id)
+    staff = db.query(Staff).filter_by(id=data.staff_id, tenant_id=user.tenant_id, branch_id=data.branch_id, active=True).first()
+    if not staff: raise HTTPException(404, "Profesional no disponible en la sucursal")
+    if data.service_id and not db.query(Service).filter_by(id=data.service_id, tenant_id=user.tenant_id, active=True).first():
+        raise HTTPException(404, "Servicio no encontrado")
+    if data.is_primary:
+        q = db.query(CustomerStaffPreference).filter_by(tenant_id=user.tenant_id, customer_id=customer_id,
+            branch_id=data.branch_id, service_id=data.service_id)
+        for old in q.all(): old.is_primary = False
+        db.flush()  # update prior primary before inserting the replacement
+    pref = CustomerStaffPreference(tenant_id=user.tenant_id, customer_id=customer_id, **data.model_dump())
+    db.add(pref)
+    try:
+        db.commit(); db.refresh(pref)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Ya existe una preferencia principal para este cliente, sucursal y servicio")
+    return {"id": pref.id, "customer_id": pref.customer_id, "branch_id": pref.branch_id,
+            "staff_id": pref.staff_id, "service_id": pref.service_id, "is_primary": pref.is_primary}
+
+
+@app.get("/customers/{customer_id}/history")
+def customer_service_history(customer_id: int, limit: int = 100,
+        user: User = Depends(current_user), db: Session = Depends(get_db)):
+    customer = db.query(Customer).filter_by(id=customer_id, tenant_id=user.tenant_id).first()
+    if not customer or not _customer_visible(db, user, customer): raise HTTPException(404, "Cliente no encontrado")
+    allowed = accessible_branch_ids(db, user)
+    q = db.query(ServiceHistory).filter_by(tenant_id=user.tenant_id, customer_id=customer_id)
+    if allowed is not None: q = q.filter(ServiceHistory.branch_id.in_(allowed))
+    return [{"service": x.service_name_snapshot, "professional": x.staff_name_snapshot,
+             "starts_at": x.starts_at, "completed_at": x.completed_at, "branch_id": x.branch_id}
+            for x in q.order_by(ServiceHistory.starts_at.desc()).limit(min(max(limit, 1), 500)).all()]
+
+
+@app.post("/appointments/{appointment_id}/complete")
+def complete_appointment(appointment_id: int,
+        user: User = Depends(require_roles("TENANT_ADMIN", "SUPER_ADMIN", "BRANCH_MANAGER", "OPERATOR")), db: Session = Depends(get_db)):
+    appointment = db.query(Appointment).filter_by(id=appointment_id, tenant_id=user.tenant_id).with_for_update().first()
+    if not appointment: raise HTTPException(404, "Reserva no encontrada")
+    assert_branch_access(db, user, appointment.branch_id)
+    if appointment.status == "COMPLETED": return {"status": "COMPLETED", "appointment_id": appointment.id}
+    if appointment.status != "CONFIRMED": raise HTTPException(409, "Solo se puede completar una cita confirmada")
+    service = db.query(Service).filter_by(id=appointment.service_id, tenant_id=user.tenant_id).first()
+    staff = db.query(Staff).filter_by(id=appointment.staff_id, tenant_id=user.tenant_id).first() if appointment.staff_id else None
+    appointment.status = "COMPLETED"
+    db.add(ServiceHistory(tenant_id=user.tenant_id, appointment_id=appointment.id,
+        customer_id=appointment.customer_id, branch_id=appointment.branch_id, service_id=appointment.service_id,
+        service_name_snapshot=service.name if service else "Servicio", staff_id=appointment.staff_id,
+        staff_name_snapshot=staff.name if staff else None, starts_at=appointment.starts_at))
+    audit(db, user, "appointment.completed", "appointment", appointment.id)
+    db.commit()
+    return {"status": "COMPLETED", "appointment_id": appointment.id}
+
+
 
 @app.get("/")
 def root():
-    return {"service": "AgendaVoice AI", "version": "4.3.0", "docs": "/docs"}
+    return {"service": "AgendaVoice AI", "version": "5.0.3", "docs": "/docs"}

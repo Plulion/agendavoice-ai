@@ -7,3 +7,8 @@ from app.modules.catalog.models import Service
 from app.modules.scheduling.models import (Staff, Resource, Appointment, BranchHours, BranchBreak, StaffHours, StaffBreak, ResourceHours, ResourceBreak)
 from app.modules.subscriptions.models import Subscription
 from app.modules.audit.models import AuditLog
+
+from app.modules.customers.relationship_models import CustomerConsent, CustomerStaffPreference, ServiceHistory
+from app.modules.notifications.models import AppointmentConfirmation, EmailOutbox
+
+from app.modules.scheduling.relationship_models import WaitlistEntry

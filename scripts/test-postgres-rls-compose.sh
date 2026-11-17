@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Load the same credentials consumed by docker-compose.yml.
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+APP_DB_PASSWORD="${APP_DB_PASSWORD:-local_app_change_me}"
+MIGRATOR_DB_PASSWORD="${MIGRATOR_DB_PASSWORD:-local_migrator_change_me}"
+
 # Dedicated local integration test runner. Creates agendavoice_test if missing
 # and provisions/cleans temporary tenants inside that isolated test database.
 docker compose up -d db redis
@@ -26,8 +36,8 @@ fi
 docker compose exec -T db psql -U postgres -d postgres -c   "GRANT CONNECT ON DATABASE agendavoice_test TO agendavoice_migrator, agendavoice_app"
 docker compose exec -T db psql -U postgres -d agendavoice_test -c   "CREATE EXTENSION IF NOT EXISTS btree_gist; GRANT USAGE, CREATE ON SCHEMA public TO agendavoice_migrator; GRANT USAGE ON SCHEMA public TO agendavoice_app; ALTER DEFAULT PRIVILEGES FOR ROLE agendavoice_migrator IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO agendavoice_app; ALTER DEFAULT PRIVILEGES FOR ROLE agendavoice_migrator IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO agendavoice_app"
 
-MIGRATOR_URL='postgresql+psycopg://agendavoice_migrator:local_migrator_change_me@db:5432/agendavoice_test'
-APP_URL='postgresql+psycopg://agendavoice_app:local_app_change_me@db:5432/agendavoice_test'
+MIGRATOR_URL="postgresql+psycopg://agendavoice_migrator:${MIGRATOR_DB_PASSWORD}@db:5432/agendavoice_test"
+APP_URL="postgresql+psycopg://agendavoice_app:${APP_DB_PASSWORD}@db:5432/agendavoice_test"
 
 docker compose run --rm -e MIGRATION_DATABASE_URL="$MIGRATOR_URL" api   sh -lc 'alembic upgrade head'
 docker compose run --rm -e TEST_DATABASE_URL="$APP_URL" api   sh -lc 'pytest -q tests/integration/test_postgres_rls.py tests/integration/test_postgres_scheduling_concurrency.py'

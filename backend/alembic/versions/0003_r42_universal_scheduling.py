@@ -87,7 +87,7 @@ def _create_schedule_table(name, entity_columns, unique_columns, checks, foreign
                    sa.CheckConstraint("weekday BETWEEN 0 AND 6", name=f"ck_{name}_weekday"),
                    sa.CheckConstraint("(is_closed AND opens_at IS NULL AND closes_at IS NULL) OR (NOT is_closed AND opens_at IS NOT NULL AND closes_at IS NOT NULL AND closes_at > opens_at)", name=f"ck_{name}_range")]
     for fk_name, local_cols, target, remote_cols in foreign_keys:
-        constraints.append(sa.ForeignKeyConstraint(local_cols, remote_cols, ondelete="CASCADE", name=fk_name))
+        constraints.append(sa.ForeignKeyConstraint(local_cols, [f"{target}.{c}" for c in remote_cols], ondelete="CASCADE", name=fk_name))
     op.create_table(name, *columns, *constraints)
     index_name, index_columns = _schedule_index(name, entity_columns)
     op.create_index(index_name, name, index_columns)
@@ -105,7 +105,7 @@ def _create_break_table(name, entity_columns, foreign_keys):
     constraints = [sa.CheckConstraint("weekday BETWEEN 0 AND 6", name=f"ck_{name}_weekday"),
                    sa.CheckConstraint("ends_at > starts_at", name=f"ck_{name}_range")]
     for fk_name, local_cols, target, remote_cols in foreign_keys:
-        constraints.append(sa.ForeignKeyConstraint(local_cols, remote_cols, ondelete="CASCADE", name=fk_name))
+        constraints.append(sa.ForeignKeyConstraint(local_cols, [f"{target}.{c}" for c in remote_cols], ondelete="CASCADE", name=fk_name))
     op.create_table(name, *columns, *constraints)
     index_name, index_columns = _schedule_index(name, entity_columns)
     op.create_index(index_name, name, index_columns)

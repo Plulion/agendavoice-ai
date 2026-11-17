@@ -1,4 +1,4 @@
-# AgendaVoice AI (R4.3.0) — Technical Documentation Index
+# AgendaVoice AI (R5.0.3) — Technical Documentation Index
 
 Welcome to the technical documentation for **AgendaVoice AI**, an enterprise multi-tenant and multi-branch scheduling engine built by **Webfinanzas Corp.**
 
@@ -29,7 +29,14 @@ Welcome to the technical documentation for **AgendaVoice AI**, an enterprise mul
 * **[`scheduling/examples/`](scheduling/examples/)** — Sample JSON payloads for branch schedules, appointments, and availability queries.
 
 ### 4. API, Deployment & QA Verification
-* **[`api/ENDPOINTS.md`](api/ENDPOINTS.md)** — Complete REST API reference for R4.3.0 (Auth, Branches, Schedules, Blind Upsert, Availability, Appointments, and Omnichannel turns).
+* **[`api/ENDPOINTS.md`](api/ENDPOINTS.md)** — Complete REST API reference for R5.0.3 (Auth, Branches, Schedules, Blind Upsert, Availability, Appointments, and Omnichannel turns).
 * **[`deployment/LOCAL_MACOS.md`](deployment/LOCAL_MACOS.md)** — Local Docker Compose setup and live PostgreSQL RLS verification guide on macOS/Linux.
 * **[`audit/AUDIT_R4.2_AND_FIX_4.2.1.md`](audit/AUDIT_R4.2_AND_FIX_4.2.1.md)** — Security and concurrency audit log and remediation matrix.
 * **[`BUILD_VERIFICATION_R4.2.md`](BUILD_VERIFICATION_R4.2.md)** / **[`BUILD_VERIFICATION_R4.2.1.md`](BUILD_VERIFICATION_R4.2.1.md)** / **[`BUILD_VERIFICATION_R4.2.2.md`](BUILD_VERIFICATION_R4.2.2.md)** — Build and test verification records.
+
+### 5. R5 Customer Workflows, Email Confirmation & Security Hardening
+* **[`R5_MASTER_SPEC.md`](R5_MASTER_SPEC.md)** — Master R5 functional specification and roadmap.
+* **[`R5_0_3_SECURITY_HARDENING.md`](R5_0_3_SECURITY_HARDENING.md)** — R5.0.3 security hardening and audit remediation log (A1, A2, A4, M3, M4, M6, N1–N4, B4).
+* **[`R5_RELEASE_AUDIT.md`](R5_RELEASE_AUDIT.md)** — Internal release audit and local verification checklist.
+* **[`api/ENDPOINTS_R5.md`](api/ENDPOINTS_R5.md)** — R5 REST API additions.
+* **[`LOCAL_SETUP_MAC.md`](LOCAL_SETUP_MAC.md)** & **[`LOCAL_TEST_PLAN.md`](LOCAL_TEST_PLAN.md)** — Local macOS Docker + Mailpit + Ollama setup and QA acceptance plan.

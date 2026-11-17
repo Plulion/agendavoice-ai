@@ -26,15 +26,12 @@ def test_phone_normalization_chile_and_international():
 
 
 def test_cross_branch_sanitized_payload_hides_other_branch_metadata():
-    payload = sanitize_cross_branch_customer(15, "  Carolina Pérez ", "912345678")
-    assert payload == {
-        "id": 15,
-        "name": "Carolina Pérez",
-        "phone": "+56912345678",
-        "cross_branch_linked": True,
-    }
-    assert "home_branch_id" not in payload
-    assert "email" not in payload
+    payload = sanitize_cross_branch_customer("912345678")
+    assert payload["cross_branch_linked"] is True
+    assert payload["requires_admin_review"] is True
+    assert payload["phone"] == "+56912345678"
+    for forbidden in ("id", "name", "first_name", "last_name", "home_branch_id", "email", "rut"):
+        assert forbidden not in payload
 
 
 def test_customer_becomes_visible_to_branch_b_after_blind_upsert_booking():

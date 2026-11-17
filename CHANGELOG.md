@@ -1,5 +1,65 @@
 # Changelog
 
+## 5.0.3 — Cross-branch privacy hardening, email TLS/local time, rate limiting & omnichannel fixes
+
+### Security & Privacy Fixes
+- **A1:** `POST /customers/resolve-phone` no longer leaks `id` or `name` for customers belonging exclusively to another branch; returns a sanitized cross-branch notice instead.
+- **A2:** `POST /appointments` always delivers confirmation links for existing customers strictly to their stored DB email (preventing email hijacking via `customer_email`) and omits `customer.name` in cross-branch confirmation emails.
+- **A4:** Added fixed-window rate limits to `POST /appointments` and `POST /appointments/{id}/resend-confirmation` (30 bookings/hour per user; 5 confirmation emails/hour per recipient address).
+- **N1:** Enforced strict `^[A-Za-z0-9_-]{32,200}$` token regex validation on public confirmation GET/POST routes, added preview rate limiting, and replaced string interpolation with `json.dumps(token)`.
+- **B4:** Masked raw Ollama exception strings behind a generic HTTP 503 message in `POST /ai/local/chat` (logging details server-side).
+
+### Functional & Operational Improvements
+- **M3:** Confirmation emails now display appointment date/time formatted in the branch's local IANA timezone (`America/Santiago`) instead of raw UTC.
+- **M4:** Added `POST /appointments/{appointment_id}/resend-confirmation` to rotate tokens and resend confirmation emails for `PENDING` bookings.
+- **M6:** Added optional `SMTP_USE_TLS`, `SMTP_USERNAME`, and `SMTP_PASSWORD` support (`STARTTLS` + `SMTP.login`) while keeping Mailpit defaults for local development.
+- **N2 / N3 / N4:** Omnichannel turns now extract emails from free-text replies via regex, prompt for full name instead of creating new customers named `"Cliente"`, and query both normalized and legacy raw phone formats.
+- **Consistency:** Aligned version metadata (`5.0.3`) across `VERSION`, FastAPI, `frontend/package.json`, `frontend/src/App.tsx`, and `docs/index.html`; ensured 100% English documentation in `docs/` and zero `.pyc` cache files.
+
+
+## 5.0.2 — R5.0.0 audit corrections
+
+### Fixed
+- Corrected all four composite foreign-key targets in the waitlist migration.
+- Fixed duplicate `customer_id` keyword construction in `POST /waitlist`.
+- Added optional email capture to omnichannel booking; new customers without a stored/provided email are asked for it before a booking is created.
+- Changed omnichannel booking wording to accurately describe `PENDING` status and email confirmation.
+- Persisted expired pending-appointment releases when availability is queried.
+- Changed email confirmation to a safe GET landing page plus explicit, rate-limited POST action; public confirmation is now audited.
+- Loaded PostgreSQL RLS integration-test credentials from `.env`, matching Compose configuration.
+- Flushed updates to existing primary professional preferences before inserting the replacement.
+- Normalized customer phone numbers on creation.
+- Restricted tenant-global customer profile edits to tenant administrators and made profile updates partial, preserving omitted fields.
+- Updated API/package version metadata and added regression tests.
+
+### Validation
+- Python compileall: passed.
+- Pytest: 59 passed, 3 skipped.
+- Shell syntax check for `scripts/test-postgres-rls-compose.sh`: passed.
+- Docker/PostgreSQL migration and integration execution: not run in this environment; Docker CLI is unavailable.
+- Frontend npm build: not run; dependencies were not available in the local npm cache.
+
+**Status:** corrected local validation candidate; not certified for Docker/GitHub release until the outstanding Docker/PostgreSQL and frontend checks pass.
+
+
+## 5.0.0 — Customer relationship and local-first confirmation foundation
+
+### Added
+- Customer first/last names and optional Chilean RUT with checksum validation and tenant-scoped uniqueness.
+- Versioned data-processing and marketing consent records.
+- Preferred professional records by customer, branch and optional service.
+- Email-confirmed appointment lifecycle (`PENDING` to `CONFIRMED`) with expiring random token, SHA-256 storage, HTML confirmation button and local Mailpit SMTP.
+- Email outbox delivery status; raw confirmation token is not persisted in the outbox.
+- Service-history snapshot when a confirmed appointment is completed.
+- Basic branch/service waitlist records.
+- Local Ollama provider adapter and isolated `/ai/local/chat` smoke-test endpoint (no database tools).
+- FORCE RLS policies for new tenant-owned tables; Alembic revision `0006_r5_customer_confirmation_history`.
+- R5 master specification, API reference, Mac setup, local test plan and internal release audit.
+
+### Notes
+- R5.0.0 is a local development foundation, not a production-ready release. Full conversational onboarding, automatic preference application, automatic waitlist matching, reminders, multi-service booking, product sales and the complete admin UI remain on the roadmap.
+- R4.3.0 code, migrations and tests are retained.
+
 ## 4.3.0 — Cross-Branch Customer Resolution (Blind Upsert) & Omnichannel Voice/WhatsApp AI
 
 ### Added

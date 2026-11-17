@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AgendaVoice AI R4.3.0 — Multi-Tenant &amp; Multi-Branch Scheduling Architecture</title>
+  <title>AgendaVoice AI R5.0.3 — Multi-Tenant &amp; Multi-Branch Scheduling Architecture</title>
   <style>
     :root {
       --bg: #0b1120;
@@ -215,7 +215,7 @@
     <div class="container nav-inner">
       <div class="brand">
         <span>Webfinanzas Corp.</span>
-        <span class="brand-badge">AgendaVoice AI R4.3.0</span>
+        <span class="brand-badge">AgendaVoice AI R5.0.3</span>
       </div>
       <nav>
         <a href="#overview">Overview</a>
@@ -472,7 +472,7 @@
     <section id="endpoints">
       <div class="container">
         <div class="section-header">
-          <h2>REST API Endpoints Reference (v4.3.0)</h2>
+          <h2>REST API Endpoints Reference (v5.0.3)</h2>
           <p>Interactive OpenAPI / Swagger documentation is automatically served at <code>http://localhost:8000/docs</code>.</p>
         </div>
 
@@ -504,7 +504,7 @@
               <tr>
                 <td><code>POST /customers/resolve-phone</code></td>
                 <td>Operator / Manager</td>
-                <td><strong>New in R4.3.0:</strong> Rate-limited exact phone lookup/creation (+569...). Returns sanitized customer ID &amp; name for cross-branch booking without leaking other branches' metadata.</td>
+                <td><strong>New in R5.0.3:</strong> Rate-limited exact phone lookup/creation (+569...). Returns a privacy-safe cross-branch notice (hiding ID, name, email &amp; history) when the phone belongs to another branch.</td>
               </tr>
               <tr>
                 <td><code>GET /availability</code><br/><code>POST /appointments</code><br/><code>POST /appointments/{id}/cancel</code></td>
@@ -514,7 +514,7 @@
               <tr>
                 <td><code>POST /channels/omnichannel/turn</code></td>
                 <td>Operator / Webhook</td>
-                <td><strong>New in R4.3.0:</strong> Executes a branch-isolated Gemini 2.5 Flash Voice or WhatsApp conversation turn to check slots or confirm appointments.</td>
+                <td><strong>New in R5.0.3:</strong> Executes a branch-isolated Gemini 2.5 Flash Voice or WhatsApp conversation turn to check slots or confirm appointments.</td>
               </tr>
             </tbody>
           </table>
@@ -588,7 +588,7 @@ docker compose up -d --build
             staff_id: 5,
             starts_at: "2026-11-18T18:00:00Z",
             ends_at: "2026-11-18T18:30:00Z",
-            status: "CONFIRMED"
+            status: "PENDING"
           }
         },
         blocked: false,
@@ -643,7 +643,7 @@ docker compose up -d --build
             appointment: {
               id: 109,
               starts_at: "2026-11-17T13:30:00+00:00",
-              status: "CONFIRMED"
+              status: "PENDING"
             },
             reply: "Perfecto Andrea Rojas, tu reserva #109 en sucursal Sucursal Las Condes quedó confirmada para 2026-11-17T13:30:00+00:00. Te esperamos."
           }

@@ -52,9 +52,18 @@ class StaffIn(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     specialties: str = ""
 class CustomerIn(BaseModel):
-    name: str = Field(min_length=2, max_length=160)
+    name: str | None = Field(default=None, min_length=2, max_length=160)
+    first_name: str | None = Field(default=None, min_length=1, max_length=100)
+    last_name: str | None = Field(default=None, min_length=1, max_length=100)
+    rut: str | None = Field(default=None, min_length=8, max_length=12)
     phone: str = Field(min_length=6, max_length=40)
     email: EmailStr | None = None
+
+    @model_validator(mode="after")
+    def require_customer_name(self):
+        if not self.name and not (self.first_name and self.last_name):
+            raise ValueError("Indique nombre completo o nombres y apellidos")
+        return self
     # Optional. For single-branch operators, defaults to their assigned branch automatically.
     branch_id: int | None = None
 class PhoneResolveIn(BaseModel):
@@ -181,9 +190,54 @@ class OmnichannelTurnIn(BaseModel):
     branch_id: int
     channel: Literal["VOICE", "WHATSAPP"] = "VOICE"
     sender_phone: str = Field(min_length=6, max_length=40)
-    sender_name: str = Field(default="Cliente", min_length=2, max_length=160)
+    sender_name: str | None = Field(default=None, min_length=2, max_length=160)
+    customer_email: EmailStr | None = None
     message: str = Field(min_length=1, max_length=1000)
     service_id: int | None = None
     staff_id: int | None = None
     resource_id: int | None = None
     starts_at: datetime | None = None
+
+
+class CustomerProfileUpdateIn(BaseModel):
+    # Partial update: omitted fields remain unchanged; explicit null clears optional fields.
+    first_name: str | None = Field(default=None, min_length=1, max_length=100)
+    last_name: str | None = Field(default=None, min_length=1, max_length=100)
+    rut: str | None = Field(default=None, min_length=8, max_length=12)
+    email: EmailStr | None = None
+
+class CustomerConsentIn(BaseModel):
+    consent_type: Literal["DATA_PROCESSING", "EMAIL_MARKETING"]
+    granted: bool
+    policy_version: str = Field(min_length=1, max_length=30)
+    source: Literal["WEB", "VOICE", "IN_PERSON", "ADMIN"] = "ADMIN"
+
+class StaffPreferenceIn(BaseModel):
+    branch_id: int
+    staff_id: int
+    service_id: int | None = None
+    is_primary: bool = True
+
+class WaitlistIn(BaseModel):
+    branch_id: int
+    customer_id: int
+    service_id: int
+    staff_id: int | None = None
+    preferred_from: datetime
+    preferred_to: datetime
+    notes: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def valid_range(self):
+        if self.preferred_from.tzinfo is None or self.preferred_to.tzinfo is None or self.preferred_to <= self.preferred_from:
+            raise ValueError("El rango de espera requiere fechas con zona horaria y fin posterior")
+        return self
+
+
+class LocalChatIn(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    system_prompt: str | None = Field(default=None, max_length=2000)
+
+class AppointmentConfirmationIn(BaseModel):
+    token: str = Field(min_length=32, max_length=200, pattern=r"^[A-Za-z0-9_-]{32,200}$")
+

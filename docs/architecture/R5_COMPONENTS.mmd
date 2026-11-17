@@ -1,0 +1,15 @@
+flowchart TB
+  Client[Customer: voice / web / messaging] --> API[FastAPI application]
+  API --> Auth[Identity, RBAC, tenant and branch scope]
+  API --> Scheduler[Availability and appointment lifecycle]
+  API --> CRM[Customer profiles, consent, preferences and history]
+  API --> Notify[Email outbox and notification adapter]
+  API --> LLM[LLM provider interface]
+  LLM --> Ollama[Ollama local model]
+  Scheduler --> DB[(PostgreSQL + FORCE RLS)]
+  CRM --> DB
+  Notify --> DB
+  Notify --> Mailpit[Mailpit local SMTP]
+  API --> Redis[(Redis rate limiter)]
+  API --> Audit[Append-only audit log]
+  Audit --> DB

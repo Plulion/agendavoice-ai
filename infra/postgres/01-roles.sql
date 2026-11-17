@@ -1,7 +1,7 @@
 -- Executed by the initial PostgreSQL superuser during container bootstrap.
 -- The migrator role owns DDL; the runtime role is neither owner nor superuser and has no BYPASSRLS.
-CREATE ROLE agendavoice_migrator LOGIN PASSWORD 'local_migrator_change_me';
-CREATE ROLE agendavoice_app LOGIN PASSWORD 'local_app_change_me' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+CREATE ROLE agendavoice_migrator LOGIN PASSWORD :'migrator_password';
+CREATE ROLE agendavoice_app LOGIN PASSWORD :'app_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
 GRANT CONNECT ON DATABASE agendavoice TO agendavoice_migrator, agendavoice_app;
 GRANT USAGE, CREATE ON SCHEMA public TO agendavoice_migrator;
 GRANT USAGE ON SCHEMA public TO agendavoice_app;

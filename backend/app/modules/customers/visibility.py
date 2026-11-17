@@ -1,16 +1,16 @@
-"""Pure branch-scoped customer visibility and cross-branch Blind Upsert rules (R4.3.0).
+"""Pure branch-scoped customer visibility and privacy-safe cross-branch resolution rules (R5.0.3).
 
 A customer is visible in general directory listings (GET /customers) if:
 - the user has tenant-wide access (None: TENANT_ADMIN or SUPER_ADMIN), or
 - the customer's origin branch (home_branch_id) is among the user's allowed branches, or
 - the customer has at least one appointment in one of the user's allowed branches.
 
-Industry standard for cross-branch telephone/WhatsApp booking (Blind Upsert):
-- A branch cannot browse or list customers belonging exclusively to other branches.
-- When a customer calls or messages a new branch B and provides their exact phone number (+569...),
-  the backend normalizes the phone number and links the new appointment to the single tenant customer
-  record without exposing prior history from other branches.
-- Once the appointment is booked in branch B, the customer legitimately becomes visible to branch B.
+Strict Cross-Branch Privacy (R5.0.3 / A1 remediation):
+- POST /customers/resolve-phone NEVER returns id, name, email, or home_branch_id
+  for a customer belonging exclusively to another branch.
+- Booking via POST /appointments with exact phone number sends the confirmation link
+  strictly to the customer's stored email address without disclosing their name or
+  history to the requesting branch.
 """
 from collections.abc import Iterable
 import re
@@ -43,13 +43,16 @@ def customer_visible(allowed_branch_ids: list[int] | None,
     return bool(allowed & set(visited_branch_ids))
 
 
-def sanitize_cross_branch_customer(customer_id: int, name: str, phone: str) -> dict:
-    """Return only the minimal customer fields required to complete a phone booking,
-    hiding home_branch_id, email, and prior visits at other branches.
+def sanitize_cross_branch_customer(phone: str) -> dict:
+    """Return a privacy-preserving cross-branch notice without exposing customer id,
+    name, email, home_branch_id, or visit history from other branches.
     """
     return {
-        "id": int(customer_id),
-        "name": name.strip(),
-        "phone": normalize_phone(phone) or phone.strip(),
         "cross_branch_linked": True,
+        "requires_admin_review": True,
+        "phone": normalize_phone(phone) or phone.strip(),
+        "detail": (
+            "Existing company customer from another branch; personal details are hidden. "
+            "Book directly via POST /appointments using phone confirmation or request administrator review."
+        ),
     }

@@ -1,0 +1,19 @@
+erDiagram
+  TENANTS ||--o{ BRANCHES : owns
+  TENANTS ||--o{ CUSTOMERS : owns
+  TENANTS ||--o{ STAFF : employs
+  TENANTS ||--o{ SERVICES : offers
+  TENANTS ||--o{ APPOINTMENTS : schedules
+  BRANCHES ||--o{ APPOINTMENTS : hosts
+  CUSTOMERS ||--o{ APPOINTMENTS : books
+  SERVICES ||--o{ APPOINTMENTS : requested
+  STAFF ||--o{ APPOINTMENTS : performs
+  CUSTOMERS ||--o{ CUSTOMER_CONSENTS : grants
+  CUSTOMERS ||--o{ CUSTOMER_STAFF_PREFERENCES : prefers
+  STAFF ||--o{ CUSTOMER_STAFF_PREFERENCES : preferred_by
+  APPOINTMENTS ||--o| APPOINTMENT_CONFIRMATIONS : requires
+  APPOINTMENTS ||--o| SERVICE_HISTORY : snapshots
+  CUSTOMERS ||--o{ SERVICE_HISTORY : receives
+  APPOINTMENTS ||--o{ EMAIL_OUTBOX : notifies
+  CUSTOMERS ||--o{ WAITLIST_ENTRIES : joins
+  SERVICES ||--o{ WAITLIST_ENTRIES : requested

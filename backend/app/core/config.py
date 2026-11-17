@@ -18,6 +18,18 @@ class Settings(BaseSettings):
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""
     gemini_api_key: str = ""
+    smtp_host: str = "mailpit"
+    smtp_port: int = 1025
+    smtp_from: str = "no-reply@agendavoice.local"
+    smtp_enabled: bool = True
+    smtp_use_tls: bool = False
+    smtp_username: str = ""
+    smtp_password: str = ""
+    public_app_url: str = "http://localhost:5173"
+    public_api_url: str = "http://localhost:8000"
+    appointment_confirmation_minutes: int = Field(default=30, gt=1, le=10080)
+    ollama_base_url: str = "http://host.docker.internal:11434"
+    ollama_model: str = "qwen2.5:3b"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     @model_validator(mode="after")
     def reject_placeholder_production_secret(self):

@@ -44,6 +44,7 @@ class Appointment(Base):
     __table_args__ = (
         CheckConstraint("ends_at > starts_at", name="ck_appointment_positive_range"),
         CheckConstraint("status IN ('PENDING','CONFIRMED','CANCELLED','COMPLETED','NO_SHOW')", name="ck_appointment_status"),
+        UniqueConstraint("tenant_id", "id", name="uq_appointments_tenant_id"),
         ForeignKeyConstraint(["tenant_id", "branch_id"], ["branches.tenant_id", "branches.id"], name="fk_appointment_tenant_branch"),
         ForeignKeyConstraint(["tenant_id", "customer_id"], ["customers.tenant_id", "customers.id"], name="fk_appointment_tenant_customer"),
         ForeignKeyConstraint(["tenant_id", "service_id"], ["services.tenant_id", "services.id"], name="fk_appointment_tenant_service"),
