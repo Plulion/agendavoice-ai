@@ -86,6 +86,13 @@ export async function api(path:string, method='GET', body?:unknown, retry=true){
     if(await renewSession()) return api(path,method,body,false)
   }
   const payload=await response.json().catch(()=>({detail:'Invalid server response'}))
-  if(!response.ok) throw new Error(payload.detail || `HTTP Error ${response.status}`)
+  if(!response.ok){
+    const msg = typeof payload.detail === 'string'
+      ? payload.detail
+      : Array.isArray(payload.detail)
+        ? payload.detail.map((e: any) => `${e?.loc?.slice(-1)[0] || 'campo'}: ${e?.msg || 'valor inválido'}`).join(' · ')
+        : `HTTP Error ${response.status}`
+    throw new Error(msg)
+  }
   return payload
 }
